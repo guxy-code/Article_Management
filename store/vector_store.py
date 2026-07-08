@@ -138,6 +138,35 @@ class VectorStore:
             return True
         return False
 
+    def search_with_filter(self, query: str, k: int = 5, filter_dict: dict = None) -> list[Document]:
+        """
+        带 metadata 过滤的语义检索。
+
+        Args:
+            query: 自然语言查询
+            k: 返回结果数量
+            filter_dict: Chroma filter，如 {"title": "某论文标题"}
+
+        Returns:
+            过滤后的最相关 Document 列表
+        """
+        if filter_dict:
+            return self._vectorstore.similarity_search(query, k=k, filter=filter_dict)
+        return self._vectorstore.similarity_search(query, k=k)
+
+    def get_all_documents(self) -> list[Document]:
+        """获取向量库中所有文档（用于构建 BM25 索引）"""
+        data = self._vectorstore.get()
+        documents = []
+        contents = data.get("documents", [])
+        metadatas = data.get("metadatas", [])
+
+        for i, content in enumerate(contents):
+            meta = metadatas[i] if i < len(metadatas) else {}
+            documents.append(Document(page_content=content, metadata=meta or {}))
+
+        return documents
+
     @property
     def total_chunks(self) -> int:
         """向量库中的总 chunk 数"""

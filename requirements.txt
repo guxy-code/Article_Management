@@ -1,6 +1,12 @@
 langchain>=0.2.0
 langchain-openai>=0.1.0
 langchain-community>=0.2.0
+langchain-chroma>=0.1.0
 python-dotenv>=1.0.0
 pypdf>=4.0.0
 chromadb>=0.5.0
+rank-bm25>=0.2.2
+jieba>=0.42
+fastapi>=0.100.0
+uvicorn>=0.20.0
+python-multipart>=0.0.6
