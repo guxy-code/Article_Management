@@ -267,6 +267,57 @@ class GraphStore:
 
         return {"nodes": node_counts, "total_edges": edge_count}
 
+    def get_keyword_graph(self) -> dict:
+        """获取关键词关联图：Paper + Concept 的二部图，展示论文之间通过共享概念的关联"""
+        nodes = []
+        edges = []
+
+        with self.driver.session() as session:
+            # 只取 Paper 和 Concept 节点，以及它们之间的 USES_CONCEPT 关系
+            result = session.run(
+                """
+                MATCH (p:Paper)-[r:USES_CONCEPT]->(c:Concept)
+                RETURN
+                    id(p) AS pid, properties(p) AS pprops,
+                    id(c) AS cid, properties(c) AS cprops,
+                    type(r) AS rel_type
+                """
+            )
+
+            seen_nodes = set()
+
+            for record in result:
+                pid = str(record["pid"])
+                cid = str(record["cid"])
+
+                if pid not in seen_nodes:
+                    seen_nodes.add(pid)
+                    pprops = record["pprops"]
+                    nodes.append({
+                        "id": pid,
+                        "type": "Paper",
+                        "label": pprops.get("title", ""),
+                        "properties": dict(pprops),
+                    })
+
+                if cid not in seen_nodes:
+                    seen_nodes.add(cid)
+                    cprops = record["cprops"]
+                    nodes.append({
+                        "id": cid,
+                        "type": "Keyword",
+                        "label": cprops.get("name", ""),
+                        "properties": dict(cprops),
+                    })
+
+                edges.append({
+                    "source": pid,
+                    "target": cid,
+                    "type": record["rel_type"],
+                })
+
+        return {"nodes": nodes, "edges": edges}
+
     def clear_all(self):
         """清空图数据库（谨慎使用）"""
         with self.driver.session() as session:

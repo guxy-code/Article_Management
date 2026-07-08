@@ -24,7 +24,7 @@ import {
   type SimulationLinkDatum,
 } from "d3-force";
 import { Brain, X } from "lucide-react";
-import { getGraph, getPaperGraph, type GraphNode, type GraphEdge } from "@/lib/api";
+import { getGraph, getPaperGraph, getKeywordGraph, type GraphNode, type GraphEdge } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Node type config
@@ -34,6 +34,7 @@ const TYPE_CONFIG: Record<string, { color: string; size: number }> = {
   Problem: { color: "#DC2626", size: 40 },
   Dataset: { color: "#CA8A04", size: 36 },
   Concept: { color: "#7C3AED", size: 34 },
+  Keyword: { color: "#059669", size: 38 },
 };
 
 function truncateLabel(label: string, maxLen: number = 18): string {
@@ -96,6 +97,7 @@ export default function KnowledgePage() {
   const searchParams = useSearchParams();
   const paperTitle = searchParams.get("paper");
 
+  const [viewMode, setViewMode] = useState<"structure" | "keywords">("keywords");
   const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -107,10 +109,18 @@ export default function KnowledgePage() {
 
   useEffect(() => {
     async function load() {
+      setIsLoading(true);
+      setError("");
       try {
-        const data = paperTitle
-          ? await getPaperGraph(paperTitle)
-          : await getGraph();
+        let data;
+        if (paperTitle) {
+          // 单篇论文视图，始终用结构图
+          data = await getPaperGraph(paperTitle);
+        } else if (viewMode === "keywords") {
+          data = await getKeywordGraph();
+        } else {
+          data = await getGraph();
+        }
         setGraphNodes(data.nodes);
         setGraphEdges(data.edges);
       } catch (err) {
@@ -120,7 +130,7 @@ export default function KnowledgePage() {
       }
     }
     load();
-  }, [paperTitle]);
+  }, [paperTitle, viewMode]);
 
   // Compute layout and build React Flow nodes/edges
   useEffect(() => {
@@ -260,6 +270,37 @@ export default function KnowledgePage() {
               <p className="text-[11px] text-foreground font-medium mt-0.5 max-w-[160px] truncate">{paperTitle}</p>
             </div>
           )}
+
+          {/* View Mode Tabs (only on global view) */}
+          {!paperTitle && (
+            <div className="mb-3 pb-2 border-b border-border">
+              <div className="flex items-center bg-secondary rounded-[8px] p-0.5">
+                <button
+                  onClick={() => setViewMode("keywords")}
+                  className={cn(
+                    "flex-1 text-[10px] font-medium px-2 py-1 rounded-[6px] transition-all",
+                    viewMode === "keywords"
+                      ? "bg-white shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Keywords
+                </button>
+                <button
+                  onClick={() => setViewMode("structure")}
+                  className={cn(
+                    "flex-1 text-[10px] font-medium px-2 py-1 rounded-[6px] transition-all",
+                    viewMode === "structure"
+                      ? "bg-white shadow-sm text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Structure
+                </button>
+              </div>
+            </div>
+          )}
+
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2 font-medium">
             Node Types
           </p>

@@ -469,6 +469,16 @@ async def get_graph_stats():
         raise HTTPException(status_code=500, detail=f"统计查询失败: {str(e)}")
 
 
+@app.get("/api/graph/keywords")
+async def get_keyword_graph():
+    """获取关键词关联图（Paper + Concept 二部图）"""
+    try:
+        data = graph_store.get_keyword_graph()
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"关键词图谱查询失败: {str(e)}")
+
+
 # ========== 启动入口 ==========
 
 if __name__ == "__main__":

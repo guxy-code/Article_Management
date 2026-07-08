@@ -278,3 +278,9 @@ export async function getGraphStats(): Promise<Record<string, any>> {
   if (!res.ok) throw new Error("获取图谱统计失败");
   return res.json();
 }
+
+export async function getKeywordGraph(): Promise<GraphData> {
+  const res = await fetch(`${API_BASE}/api/graph/keywords`);
+  if (!res.ok) throw new Error("获取关键词图谱失败");
+  return res.json();
+}
