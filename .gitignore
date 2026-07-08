@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+paper_chroma_db/
+.venv/
+venv/
