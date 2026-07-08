@@ -24,7 +24,7 @@ import {
   type SimulationLinkDatum,
 } from "d3-force";
 import { Brain, X } from "lucide-react";
-import { getGraph, getPaperGraph, getKeywordGraph, type GraphNode, type GraphEdge } from "@/lib/api";
+import { getGraph, getPaperGraph, getKeywordGraph, getPapersGraph, type GraphNode, type GraphEdge } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Node type config
@@ -96,6 +96,8 @@ function computeLayout(
 export default function KnowledgePage() {
   const searchParams = useSearchParams();
   const paperTitle = searchParams.get("paper");
+  const papersParam = searchParams.get("papers");
+  const paperTitles = papersParam ? papersParam.split("||") : null;
 
   const [viewMode, setViewMode] = useState<"structure" | "keywords">("keywords");
   const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
@@ -114,8 +116,9 @@ export default function KnowledgePage() {
       try {
         let data;
         if (paperTitle) {
-          // 单篇论文视图，始终用结构图
           data = await getPaperGraph(paperTitle);
+        } else if (paperTitles) {
+          data = await getPapersGraph(paperTitles);
         } else if (viewMode === "keywords") {
           data = await getKeywordGraph();
         } else {
@@ -130,7 +133,7 @@ export default function KnowledgePage() {
       }
     }
     load();
-  }, [paperTitle, viewMode]);
+  }, [paperTitle, paperTitles?.join("||"), viewMode]);
 
   // Compute layout and build React Flow nodes/edges
   useEffect(() => {
@@ -270,9 +273,21 @@ export default function KnowledgePage() {
               <p className="text-[11px] text-foreground font-medium mt-0.5 max-w-[160px] truncate">{paperTitle}</p>
             </div>
           )}
+          {paperTitles && (
+            <div className="mb-2 pb-2 border-b border-border">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                Comparing {paperTitles.length} papers
+              </p>
+              {paperTitles.map((t, i) => (
+                <p key={i} className="text-[10px] text-foreground mt-0.5 max-w-[160px] truncate">
+                  • {t}
+                </p>
+              ))}
+            </div>
+          )}
 
           {/* View Mode Tabs (only on global view) */}
-          {!paperTitle && (
+          {!paperTitle && !paperTitles && (
             <div className="mb-3 pb-2 border-b border-border">
               <div className="flex items-center bg-secondary rounded-[8px] p-0.5">
                 <button

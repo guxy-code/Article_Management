@@ -267,6 +267,57 @@ class GraphStore:
 
         return {"nodes": node_counts, "total_edges": edge_count}
 
+    def get_papers_subgraph(self, titles: list[str]) -> dict:
+        """获取多篇论文的合并子图（2跳，排除列表外的其他 Paper 节点）"""
+        nodes = []
+        edges = []
+
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH path = (p:Paper)-[*1..2]-(n)
+                WHERE p.title IN $titles
+                  AND ALL(node IN nodes(path) WHERE node = p OR NOT 'Paper' IN labels(node) OR node.title IN $titles)
+                UNWIND nodes(path) AS node
+                UNWIND relationships(path) AS rel
+                WITH DISTINCT node, rel
+                RETURN
+                    id(node) AS nid,
+                    labels(node) AS nlabels,
+                    properties(node) AS nprops,
+                    id(startNode(rel)) AS src,
+                    id(endNode(rel)) AS tgt,
+                    type(rel) AS rel_type
+                """,
+                titles=titles,
+            )
+
+            seen_nodes = set()
+            seen_edges = set()
+
+            for record in result:
+                nid = str(record["nid"])
+                if nid not in seen_nodes:
+                    seen_nodes.add(nid)
+                    nprops = record["nprops"]
+                    nodes.append({
+                        "id": nid,
+                        "type": record["nlabels"][0] if record["nlabels"] else "Unknown",
+                        "label": nprops.get("title") or nprops.get("name") or "",
+                        "properties": dict(nprops),
+                    })
+
+                edge_key = f"{record['src']}-{record['rel_type']}-{record['tgt']}"
+                if edge_key not in seen_edges:
+                    seen_edges.add(edge_key)
+                    edges.append({
+                        "source": str(record["src"]),
+                        "target": str(record["tgt"]),
+                        "type": record["rel_type"],
+                    })
+
+        return {"nodes": nodes, "edges": edges}
+
     def get_keyword_graph(self) -> dict:
         """获取关键词关联图：Paper + Concept 的二部图，展示论文之间通过共享概念的关联"""
         nodes = []

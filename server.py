@@ -57,9 +57,13 @@ session_store = SessionStore()
 
 # 构建 BM25 索引（从 Chroma 加载已有文档）
 bm25_store = BM25Store()
-all_docs = vector_store.get_all_documents()
-if all_docs:
-    bm25_store.build_index(all_docs)
+try:
+    all_docs = vector_store.get_all_documents()
+    if all_docs:
+        bm25_store.build_index(all_docs)
+except Exception as e:
+    print(f"⚠️ BM25 索引构建跳过: {e}")
+    all_docs = []
 
 # LLM 重排序器
 reranker = LLMReranker()
@@ -477,6 +481,22 @@ async def get_keyword_graph():
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"关键词图谱查询失败: {str(e)}")
+
+
+class PapersGraphRequest(BaseModel):
+    titles: list[str]
+
+
+@app.post("/api/graph/papers")
+async def get_papers_graph(request: PapersGraphRequest):
+    """获取多篇论文的合并子图"""
+    if not request.titles:
+        raise HTTPException(status_code=400, detail="请提供至少一篇论文标题")
+    try:
+        data = graph_store.get_papers_subgraph(request.titles)
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"图谱查询失败: {str(e)}")
 
 
 # ========== 启动入口 ==========

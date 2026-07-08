@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, LayoutGrid, List, Library as LibraryIcon, Loader2 } from "lucide-react";
+import { Plus, LayoutGrid, List, Library as LibraryIcon, Loader2, Brain, X } from "lucide-react";
 import { listPapers, deletePaper, type PaperInfo } from "@/lib/api";
 import { PaperCard } from "@/components/library/paper-card";
 import { PaperListItem } from "@/components/library/paper-list-item";
@@ -12,13 +13,16 @@ import { cn } from "@/lib/utils";
 type ViewMode = "grid" | "list";
 
 export default function LibraryPage() {
+  const router = useRouter();
   const [papers, setPapers] = useState<PaperInfo[]>([]);
   const [totalChunks, setTotalChunks] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [isLoading, setIsLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
 
   const fetchPapers = useCallback(async () => {
+    setIsLoading(true);
     try {
       const data = await listPapers();
       setPapers(data.papers);
@@ -39,6 +43,11 @@ export default function LibraryPage() {
 
     try {
       await deletePaper(title);
+      setSelectedPapers((prev) => {
+        const next = new Set(prev);
+        next.delete(title);
+        return next;
+      });
       fetchPapers();
     } catch (err) {
       alert(err instanceof Error ? err.message : "删除失败");
@@ -47,6 +56,23 @@ export default function LibraryPage() {
 
   const handleUploadSuccess = () => {
     fetchPapers();
+  };
+
+  const handleSelect = (title: string) => {
+    setSelectedPapers((prev) => {
+      const next = new Set(prev);
+      if (next.has(title)) {
+        next.delete(title);
+      } else {
+        next.add(title);
+      }
+      return next;
+    });
+  };
+
+  const handleViewSelectedGraph = () => {
+    const titles = Array.from(selectedPapers);
+    router.push(`/knowledge?papers=${encodeURIComponent(titles.join("||"))}`);
   };
 
   return (
@@ -118,6 +144,8 @@ export default function LibraryPage() {
                 <PaperCard
                   key={paper.title}
                   paper={paper}
+                  selected={selectedPapers.has(paper.title)}
+                  onSelect={handleSelect}
                   onDelete={handleDelete}
                 />
               ))}
@@ -137,6 +165,36 @@ export default function LibraryPage() {
           </div>
         )}
       </div>
+
+      {/* Selection Toolbar */}
+      <AnimatePresence>
+        {selectedPapers.size >= 2 && (
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 20, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-foreground text-white rounded-[14px] px-5 py-3 shadow-xl flex items-center gap-4"
+          >
+            <span className="text-sm">
+              {selectedPapers.size} papers selected
+            </span>
+            <button
+              onClick={handleViewSelectedGraph}
+              className="h-8 px-3 rounded-[8px] bg-white/20 hover:bg-white/30 text-sm font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Brain className="w-3.5 h-3.5" />
+              View Graph
+            </button>
+            <button
+              onClick={() => setSelectedPapers(new Set())}
+              className="w-7 h-7 rounded-[8px] flex items-center justify-center hover:bg-white/20 transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Upload Dialog */}
       <UploadDialog

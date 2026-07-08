@@ -284,3 +284,13 @@ export async function getKeywordGraph(): Promise<GraphData> {
   if (!res.ok) throw new Error("获取关键词图谱失败");
   return res.json();
 }
+
+export async function getPapersGraph(titles: string[]): Promise<GraphData> {
+  const res = await fetch(`${API_BASE}/api/graph/papers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ titles }),
+  });
+  if (!res.ok) throw new Error("获取多论文图谱失败");
+  return res.json();
+}
