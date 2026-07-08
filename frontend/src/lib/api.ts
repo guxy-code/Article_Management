@@ -240,3 +240,41 @@ export async function search(query: string, k: number = 5): Promise<SearchRespon
 
   return res.json();
 }
+
+// --- Knowledge Graph ---
+
+export interface GraphNode {
+  id: string;
+  type: string;
+  label: string;
+  properties: Record<string, any>;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type: string;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+export async function getGraph(): Promise<GraphData> {
+  const res = await fetch(`${API_BASE}/api/graph`);
+  if (!res.ok) throw new Error("获取图谱失败");
+  return res.json();
+}
+
+export async function getPaperGraph(title: string): Promise<GraphData> {
+  const res = await fetch(`${API_BASE}/api/graph/paper/${encodeURIComponent(title)}`);
+  if (!res.ok) throw new Error("获取论文图谱失败");
+  return res.json();
+}
+
+export async function getGraphStats(): Promise<Record<string, any>> {
+  const res = await fetch(`${API_BASE}/api/graph/stats`);
+  if (!res.ok) throw new Error("获取图谱统计失败");
+  return res.json();
+}

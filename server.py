@@ -30,6 +30,8 @@ from store.hybrid_retriever import HybridRetriever
 from store.reranker import LLMReranker
 from rag.qa_chain import PaperQAChain
 from rag.session_store import SessionStore
+from graph.neo4j_store import GraphStore
+from graph.extractor import KnowledgeExtractor
 
 
 # ========== 初始化 ==========
@@ -75,6 +77,11 @@ qa_chain = PaperQAChain(
     session_store=session_store,
 )
 metadata_extractor = MetadataExtractor()
+
+# 知识图谱
+graph_store = GraphStore()
+graph_store.init_schema()
+knowledge_extractor = KnowledgeExtractor()
 
 # 上传文件保存目录
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploaded_papers")
@@ -268,6 +275,16 @@ async def upload_paper(
     ]
     bm25_store.add_documents(bm25_docs)
 
+    # 知识图谱提取 + 写入 Neo4j
+    try:
+        graph_data = knowledge_extractor.extract(
+            result.text[:3000], title=paper_title, authors=paper_authors
+        )
+        graph_store.add_paper_graph(graph_data)
+    except Exception as e:
+        # 图谱提取失败不影响主流程
+        print(f"⚠️ 知识图谱提取失败: {e}")
+
     return {
         "status": "success",
         "message": "入库成功",
@@ -415,6 +432,41 @@ async def search(request: SearchRequest):
         ))
 
     return SearchResponse(results=results, total=len(results))
+
+
+# ========== 知识图谱 ==========
+
+@app.get("/api/graph")
+async def get_graph():
+    """获取完整知识图谱（所有节点和边）"""
+    try:
+        data = graph_store.get_full_graph()
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"图谱查询失败: {str(e)}")
+
+
+@app.get("/api/graph/paper/{title}")
+async def get_paper_graph(title: str):
+    """获取某篇论文相关的子图"""
+    try:
+        data = graph_store.get_paper_subgraph(title)
+        if not data["nodes"]:
+            raise HTTPException(status_code=404, detail=f"未找到论文《{title}》的图谱数据")
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"图谱查询失败: {str(e)}")
+
+
+@app.get("/api/graph/stats")
+async def get_graph_stats():
+    """获取图谱统计信息"""
+    try:
+        return graph_store.get_stats()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"统计查询失败: {str(e)}")
 
 
 # ========== 启动入口 ==========
