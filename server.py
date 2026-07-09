@@ -18,6 +18,7 @@ load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -382,6 +383,30 @@ async def list_papers():
         papers=papers,
         total=len(papers),
         total_chunks=vector_store.total_chunks,
+    )
+
+
+@app.get("/api/papers/{title}/pdf")
+async def get_paper_pdf(title: str):
+    """根据论文标题获取 PDF 文件"""
+    paper_chunks = vector_store.get_paper_chunks(title)
+    if not paper_chunks:
+        raise HTTPException(status_code=404, detail=f"未找到论文《{title}》")
+
+    source = paper_chunks[0].metadata.get("source", "")
+    if not source or not os.path.isfile(source):
+        raise HTTPException(status_code=404, detail="PDF 文件不存在或已被删除")
+
+    # 安全校验：确保路径在 UPLOAD_DIR 内
+    real_source = os.path.realpath(source)
+    real_upload_dir = os.path.realpath(UPLOAD_DIR)
+    if not real_source.startswith(real_upload_dir):
+        raise HTTPException(status_code=403, detail="访问被拒绝")
+
+    return FileResponse(
+        real_source,
+        media_type="application/pdf",
+        filename=os.path.basename(real_source),
     )
 
 

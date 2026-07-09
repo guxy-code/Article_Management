@@ -137,3 +137,31 @@ body {
   background: #f9fafb;
   font-weight: 600;
 }
+
+/* ========== React-PDF Text Layer Fix ========== */
+.react-pdf__Page {
+  position: relative !important;
+}
+
+.react-pdf__Page__textContent {
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  overflow: hidden !important;
+}
+
+.react-pdf__Page__textContent span {
+  color: transparent !important;
+}
+
+.react-pdf__Page__textContent span::selection {
+  background: rgba(79, 70, 229, 0.4);
+  color: transparent;
+}
+
+.react-pdf__Page__textContent span::-moz-selection {
+  background: rgba(79, 70, 229, 0.4);
+  color: transparent;
+}

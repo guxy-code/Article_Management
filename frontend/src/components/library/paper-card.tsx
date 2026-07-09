@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { FileText, Trash2, User, Layers, Brain, Check } from "lucide-react";
+import { FileText, Trash2, User, Layers, Brain, Check, Eye } from "lucide-react";
 import type { PaperInfo } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -11,9 +11,10 @@ interface PaperCardProps {
   selected?: boolean;
   onSelect?: (title: string) => void;
   onDelete: (title: string) => void;
+  onView?: (title: string) => void;
 }
 
-export function PaperCard({ paper, selected, onSelect, onDelete }: PaperCardProps) {
+export function PaperCard({ paper, selected, onSelect, onDelete, onView }: PaperCardProps) {
   const router = useRouter();
 
   return (
@@ -45,6 +46,14 @@ export function PaperCard({ paper, selected, onSelect, onDelete }: PaperCardProp
 
       {/* Top-right actions */}
       <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all">
+        <button
+          onClick={() => onView?.(paper.title)}
+          className="w-7 h-7 rounded-[8px] flex items-center justify-center hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+          aria-label={`View PDF for ${paper.title}`}
+          title="View PDF"
+        >
+          <Eye className="w-3.5 h-3.5" />
+        </button>
         <button
           onClick={() => router.push(`/knowledge?paper=${encodeURIComponent(paper.title)}`)}
           className="w-7 h-7 rounded-[8px] flex items-center justify-center hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"

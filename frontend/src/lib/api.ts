@@ -137,6 +137,10 @@ export async function deletePaper(title: string): Promise<void> {
   }
 }
 
+export function getPaperPdfUrl(title: string): string {
+  return `${API_BASE}/api/papers/${encodeURIComponent(title)}/pdf`;
+}
+
 // ========== Chat ==========
 
 export async function chat(

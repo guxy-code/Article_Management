@@ -2,13 +2,20 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, LayoutGrid, List, Library as LibraryIcon, Loader2, Brain, X } from "lucide-react";
+import { Plus, LayoutGrid, List, Library as LibraryIcon, Brain, X } from "lucide-react";
 import { listPapers, deletePaper, type PaperInfo } from "@/lib/api";
 import { PaperCard } from "@/components/library/paper-card";
 import { PaperListItem } from "@/components/library/paper-list-item";
 import { UploadDialog } from "@/components/library/upload-dialog";
 import { cn } from "@/lib/utils";
+
+// Dynamic import to avoid SSR issues with react-pdf (requires browser APIs)
+const PdfViewer = dynamic(
+  () => import("@/components/library/pdf-viewer").then((mod) => mod.PdfViewer),
+  { ssr: false }
+);
 
 type ViewMode = "grid" | "list";
 
@@ -20,6 +27,7 @@ export default function LibraryPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
+  const [viewingPaper, setViewingPaper] = useState<string | null>(null);
 
   const fetchPapers = useCallback(async () => {
     setIsLoading(true);
@@ -74,6 +82,15 @@ export default function LibraryPage() {
     const titles = Array.from(selectedPapers);
     router.push(`/knowledge?papers=${encodeURIComponent(titles.join("||"))}`);
   };
+
+  // If viewing a PDF, show the inline viewer instead of the library list
+  if (viewingPaper) {
+    return (
+      <div className="h-full flex flex-col">
+        <PdfViewer title={viewingPaper} onBack={() => setViewingPaper(null)} />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col">
@@ -147,6 +164,7 @@ export default function LibraryPage() {
                   selected={selectedPapers.has(paper.title)}
                   onSelect={handleSelect}
                   onDelete={handleDelete}
+                  onView={(title) => setViewingPaper(title)}
                 />
               ))}
             </AnimatePresence>
@@ -159,6 +177,7 @@ export default function LibraryPage() {
                   key={paper.title}
                   paper={paper}
                   onDelete={handleDelete}
+                  onView={(title) => setViewingPaper(title)}
                 />
               ))}
             </AnimatePresence>

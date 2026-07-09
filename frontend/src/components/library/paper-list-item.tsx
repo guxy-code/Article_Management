@@ -1,15 +1,16 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { FileText, Trash2 } from "lucide-react";
+import { FileText, Trash2, Eye } from "lucide-react";
 import type { PaperInfo } from "@/lib/api";
 
 interface PaperListItemProps {
   paper: PaperInfo;
   onDelete: (title: string) => void;
+  onView?: (title: string) => void;
 }
 
-export function PaperListItem({ paper, onDelete }: PaperListItemProps) {
+export function PaperListItem({ paper, onDelete, onView }: PaperListItemProps) {
   return (
     <motion.div
       layout
@@ -38,6 +39,16 @@ export function PaperListItem({ paper, onDelete }: PaperListItemProps) {
       <span className="text-[11px] text-muted-foreground bg-secondary px-2 py-0.5 rounded-full shrink-0">
         {paper.chunks} chunks
       </span>
+
+      {/* View PDF */}
+      <button
+        onClick={() => onView?.(paper.title)}
+        className="w-7 h-7 rounded-[8px] flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all shrink-0"
+        aria-label={`View PDF for ${paper.title}`}
+        title="View PDF"
+      >
+        <Eye className="w-3.5 h-3.5" />
+      </button>
 
       {/* Delete */}
       <button
