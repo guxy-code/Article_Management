@@ -375,6 +375,18 @@ class GraphStore:
             result = session.run("MATCH (c:Concept) RETURN c.name AS name ORDER BY name")
             return [r["name"] for r in result]
 
+    def get_concept_frequency(self) -> list[dict]:
+        """返回每个概念被几篇论文引用，按频率降序"""
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (c:Concept)<-[:USES_CONCEPT]-(p:Paper)
+                RETURN c.name AS name, count(p) AS count
+                ORDER BY count DESC, name
+                """
+            )
+            return [{"name": r["name"], "count": r["count"]} for r in result]
+
     def get_paper_concepts(self, title: str) -> list[str]:
         """获取某篇论文关联的 Concept 列表"""
         with self.driver.session() as session:

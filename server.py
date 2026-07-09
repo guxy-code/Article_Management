@@ -509,6 +509,16 @@ async def get_concepts():
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
+@app.get("/api/graph/concept-frequency")
+async def get_concept_frequency():
+    """获取概念被引用频率（按论文数降序）"""
+    try:
+        data = graph_store.get_concept_frequency()
+        return {"concepts": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
 @app.get("/api/graph/papers-with-concepts")
 async def get_papers_with_concepts():
     """获取所有论文及其关键词概念"""

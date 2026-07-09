@@ -312,3 +312,15 @@ export async function getPapersWithConcepts(): Promise<{ papers: PaperWithConcep
   if (!res.ok) throw new Error("获取论文概念失败");
   return res.json();
 }
+
+
+export interface ConceptFrequency {
+  name: string;
+  count: number;
+}
+
+export async function getConceptFrequency(): Promise<{ concepts: ConceptFrequency[] }> {
+  const res = await fetch(`${API_BASE}/api/graph/concept-frequency`);
+  if (!res.ok) throw new Error("获取概念频率失败");
+  return res.json();
+}
