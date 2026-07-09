@@ -369,6 +369,37 @@ class GraphStore:
 
         return {"nodes": nodes, "edges": edges}
 
+    def get_all_concepts(self) -> list[str]:
+        """获取所有 Concept 节点名称"""
+        with self.driver.session() as session:
+            result = session.run("MATCH (c:Concept) RETURN c.name AS name ORDER BY name")
+            return [r["name"] for r in result]
+
+    def get_paper_concepts(self, title: str) -> list[str]:
+        """获取某篇论文关联的 Concept 列表"""
+        with self.driver.session() as session:
+            result = session.run(
+                "MATCH (p:Paper {title: $title})-[:USES_CONCEPT]->(c:Concept) RETURN c.name AS name",
+                title=title,
+            )
+            return [r["name"] for r in result]
+
+    def get_papers_with_concepts(self) -> list[dict]:
+        """获取所有论文及其关联的概念"""
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (p:Paper)
+                OPTIONAL MATCH (p)-[:USES_CONCEPT]->(c:Concept)
+                RETURN p.title AS title, p.authors AS authors, collect(c.name) AS concepts
+                ORDER BY p.title
+                """
+            )
+            return [
+                {"title": r["title"], "authors": r["authors"] or "", "concepts": r["concepts"]}
+                for r in result
+            ]
+
     def clear_all(self):
         """清空图数据库（谨慎使用）"""
         with self.driver.session() as session:

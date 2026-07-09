@@ -499,6 +499,26 @@ async def get_papers_graph(request: PapersGraphRequest):
         raise HTTPException(status_code=500, detail=f"图谱查询失败: {str(e)}")
 
 
+@app.get("/api/graph/concepts")
+async def get_concepts():
+    """获取所有概念关键词"""
+    try:
+        concepts = graph_store.get_all_concepts()
+        return {"concepts": concepts}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@app.get("/api/graph/papers-with-concepts")
+async def get_papers_with_concepts():
+    """获取所有论文及其关键词概念"""
+    try:
+        data = graph_store.get_papers_with_concepts()
+        return {"papers": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
 # ========== 启动入口 ==========
 
 if __name__ == "__main__":

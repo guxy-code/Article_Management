@@ -294,3 +294,21 @@ export async function getPapersGraph(titles: string[]): Promise<GraphData> {
   if (!res.ok) throw new Error("获取多论文图谱失败");
   return res.json();
 }
+
+export async function getConcepts(): Promise<{ concepts: string[] }> {
+  const res = await fetch(`${API_BASE}/api/graph/concepts`);
+  if (!res.ok) throw new Error("获取概念失败");
+  return res.json();
+}
+
+export interface PaperWithConcepts {
+  title: string;
+  authors: string;
+  concepts: string[];
+}
+
+export async function getPapersWithConcepts(): Promise<{ papers: PaperWithConcepts[] }> {
+  const res = await fetch(`${API_BASE}/api/graph/papers-with-concepts`);
+  if (!res.ok) throw new Error("获取论文概念失败");
+  return res.json();
+}
