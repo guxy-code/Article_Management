@@ -87,6 +87,10 @@ graph_store = GraphStore()
 graph_store.init_schema()
 knowledge_extractor = KnowledgeExtractor()
 
+# 图谱增强检索：注入到 qa_chain
+from rag.graph_retriever import GraphRetriever
+qa_chain.graph_retriever = GraphRetriever(graph_store)
+
 # 上传文件保存目录
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploaded_papers")
 os.makedirs(UPLOAD_DIR, exist_ok=True)

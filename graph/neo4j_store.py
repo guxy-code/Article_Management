@@ -387,6 +387,71 @@ class GraphStore:
             )
             return [{"name": r["name"], "count": r["count"]} for r in result]
 
+    def query_related(self, entity: str) -> list[dict]:
+        """
+        查询与某个实体相关的所有关系。
+        支持模糊匹配（包含关系），返回三元组列表。
+        """
+        with self.driver.session() as session:
+            # 先精确匹配，再模糊匹配
+            result = session.run(
+                """
+                MATCH (a)-[r]-(b)
+                WHERE a.name = $entity OR a.title = $entity
+                   OR toLower(a.name) CONTAINS toLower($entity)
+                   OR toLower(a.title) CONTAINS toLower($entity)
+                RETURN
+                    coalesce(a.title, a.name) AS source,
+                    labels(a)[0] AS source_type,
+                    type(r) AS relation,
+                    coalesce(b.title, b.name) AS target,
+                    labels(b)[0] AS target_type,
+                    startNode(r) = a AS is_outgoing
+                LIMIT 20
+                """,
+                entity=entity,
+            )
+
+            triples = []
+            for r in result:
+                if r["is_outgoing"]:
+                    triples.append({
+                        "subject": r["source"],
+                        "subject_type": r["source_type"],
+                        "relation": r["relation"],
+                        "object": r["target"],
+                        "object_type": r["target_type"],
+                    })
+                else:
+                    triples.append({
+                        "subject": r["target"],
+                        "subject_type": r["target_type"],
+                        "relation": r["relation"],
+                        "object": r["source"],
+                        "object_type": r["source_type"],
+                    })
+            return triples
+
+    def query_path(self, entity_a: str, entity_b: str) -> list[dict]:
+        """查询两个实体之间的最短路径"""
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (a), (b)
+                WHERE (a.name = $a OR a.title = $a OR toLower(a.name) CONTAINS toLower($a))
+                  AND (b.name = $b OR b.title = $b OR toLower(b.name) CONTAINS toLower($b))
+                WITH a, b LIMIT 1
+                MATCH path = shortestPath((a)-[*..5]-(b))
+                UNWIND relationships(path) AS r
+                RETURN
+                    coalesce(startNode(r).title, startNode(r).name) AS source,
+                    type(r) AS relation,
+                    coalesce(endNode(r).title, endNode(r).name) AS target
+                """,
+                a=entity_a, b=entity_b,
+            )
+            return [{"source": r["source"], "relation": r["relation"], "target": r["target"]} for r in result]
+
     def get_paper_concepts(self, title: str) -> list[str]:
         """获取某篇论文关联的 Concept 列表"""
         with self.driver.session() as session:
