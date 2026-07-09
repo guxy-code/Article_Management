@@ -95,6 +95,26 @@ qa_chain.graph_retriever = GraphRetriever(graph_store)
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploaded_papers")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# 上传日志
+UPLOAD_LOG = os.path.join(os.path.dirname(__file__), "upload_log.json")
+
+
+def _log_upload(title: str):
+    """记录上传时间"""
+    import json
+    from datetime import datetime
+    try:
+        if os.path.exists(UPLOAD_LOG):
+            with open(UPLOAD_LOG, "r", encoding="utf-8") as f:
+                logs = json.load(f)
+        else:
+            logs = []
+        logs.append({"title": title, "date": datetime.now().strftime("%Y-%m-%d")})
+        with open(UPLOAD_LOG, "w", encoding="utf-8") as f:
+            json.dump(logs, f, ensure_ascii=False)
+    except Exception:
+        pass
+
 
 # ========== 请求/响应模型 ==========
 
@@ -293,6 +313,9 @@ async def upload_paper(
         # 图谱提取失败不影响主流程
         print(f"⚠️ 知识图谱提取失败: {e}")
 
+    # 记录上传日志
+    _log_upload(paper_title)
+
     return {
         "status": "success",
         "message": "入库成功",
@@ -301,6 +324,31 @@ async def upload_paper(
         "chunks": count,
         "pages": result.total_pages,
     }
+
+
+@app.get("/api/papers/upload-history")
+async def get_upload_history():
+    """获取最近 7 天每天上传论文数量"""
+    from datetime import datetime, timedelta
+    try:
+        if os.path.exists(UPLOAD_LOG):
+            with open(UPLOAD_LOG, "r", encoding="utf-8") as f:
+                logs = json.load(f)
+        else:
+            logs = []
+
+        # 统计最近 7 天
+        today = datetime.now().date()
+        days = []
+        for i in range(6, -1, -1):
+            d = today - timedelta(days=i)
+            date_str = d.strftime("%Y-%m-%d")
+            count = sum(1 for log in logs if log.get("date") == date_str)
+            days.append({"date": date_str, "label": d.strftime("%m/%d"), "count": count})
+
+        return {"days": days}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/papers", response_model=PaperListResponse)
@@ -519,6 +567,26 @@ async def get_concept_frequency():
     try:
         data = graph_store.get_concept_frequency()
         return {"concepts": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@app.get("/api/graph/method-evolution")
+async def get_method_evolution():
+    """获取方法改进关系"""
+    try:
+        data = graph_store.get_method_evolution()
+        return {"relations": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@app.get("/api/graph/problems-solutions")
+async def get_problems_solutions():
+    """获取论文解决的问题"""
+    try:
+        data = graph_store.get_problems_solutions()
+        return {"data": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 

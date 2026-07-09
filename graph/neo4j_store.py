@@ -387,6 +387,29 @@ class GraphStore:
             )
             return [{"name": r["name"], "count": r["count"]} for r in result]
 
+    def get_method_evolution(self) -> list[dict]:
+        """获取所有方法改进关系"""
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (a:Method)-[:IMPROVES]->(b:Method)
+                RETURN a.name AS from_method, b.name AS to_method
+                """
+            )
+            return [{"from": r["from_method"], "to": r["to_method"]} for r in result]
+
+    def get_problems_solutions(self) -> list[dict]:
+        """获取论文解决的问题列表"""
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (p:Paper)-[:ADDRESSES]->(pr:Problem)
+                RETURN p.title AS paper, pr.name AS problem
+                ORDER BY p.title
+                """
+            )
+            return [{"paper": r["paper"], "problem": r["problem"]} for r in result]
+
     def query_related(self, entity: str) -> list[dict]:
         """
         查询与某个实体相关的所有关系。

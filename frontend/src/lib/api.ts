@@ -324,3 +324,29 @@ export async function getConceptFrequency(): Promise<{ concepts: ConceptFrequenc
   if (!res.ok) throw new Error("获取概念频率失败");
   return res.json();
 }
+
+
+export async function getMethodEvolution(): Promise<{ relations: { from: string; to: string }[] }> {
+  const res = await fetch(`${API_BASE}/api/graph/method-evolution`);
+  if (!res.ok) throw new Error("获取方法演进失败");
+  return res.json();
+}
+
+export async function getProblemsSolutions(): Promise<{ data: { paper: string; problem: string }[] }> {
+  const res = await fetch(`${API_BASE}/api/graph/problems-solutions`);
+  if (!res.ok) throw new Error("获取问题解决方案失败");
+  return res.json();
+}
+
+
+export interface UploadDay {
+  date: string;
+  label: string;
+  count: number;
+}
+
+export async function getUploadHistory(): Promise<{ days: UploadDay[] }> {
+  const res = await fetch(`${API_BASE}/api/papers/upload-history`);
+  if (!res.ok) throw new Error("获取上传历史失败");
+  return res.json();
+}
