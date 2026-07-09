@@ -31,6 +31,7 @@ from store.hybrid_retriever import HybridRetriever
 from store.reranker import LLMReranker
 from rag.qa_chain import PaperQAChain
 from rag.session_store import SessionStore
+from rag.annotation_store import AnnotationStore
 from graph.neo4j_store import GraphStore
 from graph.extractor import KnowledgeExtractor
 from recommend.semantic_scholar import search_papers, get_recommendation_keywords
@@ -57,6 +58,7 @@ app.add_middleware(
 # 全局实例
 vector_store = VectorStore()
 session_store = SessionStore()
+annotation_store = AnnotationStore()
 
 # 构建 BM25 索引（从 Chroma 加载已有文档）
 bm25_store = BM25Store()
@@ -420,6 +422,63 @@ async def delete_paper(title: str):
         return {"status": "success", "message": f"已删除《{title}》"}
     else:
         raise HTTPException(status_code=404, detail=f"未找到论文《{title}》")
+
+
+# ========== 标注管理 ==========
+
+class AnnotationCreate(BaseModel):
+    paper_title: str
+    page: int
+    text: str
+    note: str = ""
+    color: str = "yellow"
+    type: str = "highlight"
+    rects: list[dict]
+
+
+class AnnotationUpdate(BaseModel):
+    note: Optional[str] = None
+    color: Optional[str] = None
+
+
+@app.get("/api/annotations/{paper_title}")
+async def get_annotations(paper_title: str):
+    """获取某篇论文的所有标注"""
+    annotations = annotation_store.list_by_paper(paper_title)
+    return {"annotations": annotations}
+
+
+@app.post("/api/annotations")
+async def create_annotation(data: AnnotationCreate):
+    """创建标注"""
+    annotation = annotation_store.create(
+        paper_title=data.paper_title,
+        page=data.page,
+        text=data.text,
+        note=data.note,
+        color=data.color,
+        type=data.type,
+        rects=data.rects,
+    )
+    return annotation
+
+
+@app.put("/api/annotations/{annotation_id}")
+async def update_annotation(annotation_id: str, data: AnnotationUpdate):
+    """更新标注"""
+    success = annotation_store.update(annotation_id, note=data.note, color=data.color)
+    if not success:
+        raise HTTPException(status_code=404, detail="标注不存在")
+    return {"status": "success"}
+
+
+@app.delete("/api/annotations/{annotation_id}")
+async def delete_annotation(annotation_id: str):
+    """删除标注"""
+    success = annotation_store.delete(annotation_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="标注不存在")
+    return {"status": "success"}
 
 
 # ========== 问答与检索 ==========

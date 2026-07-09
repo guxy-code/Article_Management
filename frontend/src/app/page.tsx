@@ -194,13 +194,13 @@ export default function HomePage() {
             {/* To-Do */}
             <div className="p-4 rounded-[14px] border border-border bg-white">
               <h2 className="text-sm font-medium mb-3">To-Do</h2>
-              <div className="space-y-2 mb-3">
-                {todos.slice(0, 5).map((todo) => (
+              <div className="space-y-2 mb-3 max-h-[160px] overflow-auto pr-0.5">
+                {todos.map((todo) => (
                   <div key={todo.id} className="group flex items-center gap-2.5 px-2.5 py-2 rounded-[8px] hover:bg-secondary/50 transition-colors">
                     <button onClick={() => toggleTodo(todo.id)} className={cn("w-4.5 h-4.5 rounded-[5px] border-2 flex items-center justify-center shrink-0 transition-all", todo.done ? "bg-primary border-primary" : "border-border hover:border-primary/50")}>
                       {todo.done && <Check className="w-3 h-3 text-white" />}
                     </button>
-                    <span className={cn("text-[12px] flex-1 truncate", todo.done && "line-through text-muted-foreground")}>{todo.text}</span>
+                    <span className={cn("text-sm flex-1 truncate", todo.done && "line-through text-muted-foreground")}>{todo.text}</span>
                     <button onClick={() => deleteTodo(todo.id)} className="w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>

@@ -141,6 +141,67 @@ export function getPaperPdfUrl(title: string): string {
   return `${API_BASE}/api/papers/${encodeURIComponent(title)}/pdf`;
 }
 
+// ========== Annotations ==========
+
+export interface AnnotationRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Annotation {
+  id: string;
+  paper_title: string;
+  page: number;
+  text: string;
+  note: string;
+  color: string;
+  type: "highlight" | "underline" | "strikethrough";
+  rects: AnnotationRect[];
+  created_at: string;
+}
+
+export async function getAnnotations(paperTitle: string): Promise<{ annotations: Annotation[] }> {
+  const res = await fetch(`${API_BASE}/api/annotations/${encodeURIComponent(paperTitle)}`);
+  if (!res.ok) throw new Error("获取标注失败");
+  return res.json();
+}
+
+export async function createAnnotation(data: {
+  paper_title: string;
+  page: number;
+  text: string;
+  note?: string;
+  color: string;
+  type: "highlight" | "underline" | "strikethrough";
+  rects: AnnotationRect[];
+}): Promise<Annotation> {
+  const res = await fetch(`${API_BASE}/api/annotations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("创建标注失败");
+  return res.json();
+}
+
+export async function updateAnnotation(id: string, data: { note?: string; color?: string }): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/annotations/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("更新标注失败");
+}
+
+export async function deleteAnnotation(id: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/annotations/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("删除标注失败");
+}
+
 // ========== Chat ==========
 
 export async function chat(

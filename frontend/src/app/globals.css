@@ -150,6 +150,11 @@ body {
   right: 0 !important;
   bottom: 0 !important;
   overflow: hidden !important;
+  z-index: 2;
+}
+
+.react-pdf__Page__annotations {
+  z-index: 3;
 }
 
 .react-pdf__Page__textContent span {
