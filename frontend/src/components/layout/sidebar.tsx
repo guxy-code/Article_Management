@@ -10,6 +10,7 @@ import {
   BarChart3,
   Home,
   Brain,
+  Sparkles,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -24,7 +25,7 @@ const navItems = [
   { href: "/", icon: Home, label: "Home" },
   { href: "/chat", icon: MessageSquare, label: "AI Chat" },
   { href: "/library", icon: Library, label: "Library" },
-  { href: "/search", icon: Search, label: "Search" },
+  { href: "/discover", icon: Sparkles, label: "Discover" },
   { href: "/knowledge", icon: Brain, label: "Knowledge" },
   { href: "/stats", icon: BarChart3, label: "Statistics" },
 ];

@@ -32,6 +32,8 @@ from rag.qa_chain import PaperQAChain
 from rag.session_store import SessionStore
 from graph.neo4j_store import GraphStore
 from graph.extractor import KnowledgeExtractor
+from recommend.semantic_scholar import search_papers, get_recommendation_keywords
+from recommend.ccf_mapper import CCFMapper
 
 
 # ========== 初始化 ==========
@@ -90,6 +92,9 @@ knowledge_extractor = KnowledgeExtractor()
 # 图谱增强检索：注入到 qa_chain
 from rag.graph_retriever import GraphRetriever
 qa_chain.graph_retriever = GraphRetriever(graph_store)
+
+# CCF 映射
+ccf_mapper = CCFMapper()
 
 # 上传文件保存目录
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploaded_papers")
@@ -599,6 +604,47 @@ async def get_papers_with_concepts():
         return {"papers": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+# ========== 论文推荐 ==========
+
+@app.get("/api/recommend")
+async def recommend_papers(range: str = "1year", level: str = "all"):
+    """
+    基于用户研究方向推荐最新论文。
+
+    Query params:
+        range: "1year" / "6months" / "3months"
+        level: "all" / "A" / "B" / "C"
+    """
+    from datetime import datetime
+
+    # 1. 获取推荐关键词
+    keywords = get_recommendation_keywords(graph_store)
+    if not keywords:
+        return {"papers": [], "keywords": [], "message": "请先上传论文以生成研究画像"}
+
+    # 2. 计算时间范围
+    current_year = datetime.now().year
+    range_map = {
+        "1year": current_year - 1,
+        "6months": current_year,
+        "3months": current_year,
+    }
+    year_from = range_map.get(range, current_year - 1)
+
+    # 3. 调 Semantic Scholar
+    results = search_papers(keywords, year_from=year_from, limit=20)
+
+    # 4. 附加 CCF 等级
+    for paper in results:
+        paper["ccf_level"] = ccf_mapper.get_level(paper.get("venue", ""))
+
+    # 5. 按等级过滤
+    if level != "all":
+        results = [p for p in results if p.get("ccf_level") == level.upper()]
+
+    return {"papers": results[:10], "keywords": keywords}
 
 
 # ========== 启动入口 ==========

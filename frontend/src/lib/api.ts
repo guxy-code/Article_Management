@@ -350,3 +350,26 @@ export async function getUploadHistory(): Promise<{ days: UploadDay[] }> {
   if (!res.ok) throw new Error("获取上传历史失败");
   return res.json();
 }
+
+
+// --- Recommend ---
+
+export interface RecommendedPaper {
+  title: string;
+  authors: string[];
+  year: number | null;
+  venue: string;
+  url: string;
+  ccf_level: string | null;
+}
+
+export async function getRecommendations(
+  range: string = "1year",
+  level: string = "all"
+): Promise<{ papers: RecommendedPaper[]; keywords: string[] }> {
+  const res = await fetch(
+    `${API_BASE}/api/recommend?range=${range}&level=${level}`
+  );
+  if (!res.ok) throw new Error("获取推荐失败");
+  return res.json();
+}
