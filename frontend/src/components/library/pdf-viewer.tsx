@@ -8,6 +8,7 @@ import {
   ZoomOut,
   Loader2,
   StickyNote,
+  MessageCircle,
 } from "lucide-react";
 import { Document, Page, pdfjs } from "react-pdf";
 import "react-pdf/dist/Page/AnnotationLayer.css";
@@ -23,6 +24,7 @@ import { AnnotationLayer } from "./annotation-layer";
 import { HighlightToolbar } from "./highlight-toolbar";
 import { AnnotationTooltip } from "./annotation-tooltip";
 import { AnnotationPanel } from "./annotation-panel";
+import { PdfChatPanel } from "./pdf-chat-panel";
 
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -47,6 +49,10 @@ export function PdfViewer({ title, onBack }: PdfViewerProps) {
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [hoveredAnnotationId, setHoveredAnnotationId] = useState<string | null>(null);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
+
+  // Chat panel
+  const [chatOpen, setChatOpen] = useState(false);
+  const [pendingQuote, setPendingQuote] = useState<string | null>(null);
 
   // Selection toolbar
   const [selectionToolbar, setSelectionToolbar] = useState<{
@@ -250,6 +256,17 @@ export function PdfViewer({ title, onBack }: PdfViewerProps) {
     setPanelOpen(true);
   }, []);
 
+  // Ask AI about selected text
+  const handleAskAI = useCallback(() => {
+    if (!selectionToolbar) return;
+    setPendingQuote(selectionToolbar.text);
+    setSelectionToolbar(null);
+    window.getSelection()?.removeAllRanges();
+    setChatOpen(true);
+    // Close annotation panel if open to give room
+    setPanelOpen(false);
+  }, [selectionToolbar]);
+
   // Dismiss toolbar when clicking elsewhere (only if no active selection)
   const handleContainerClick = useCallback((e: React.MouseEvent) => {
     // If the click originated from an annotation highlight, don't interfere
@@ -330,6 +347,23 @@ export function PdfViewer({ title, onBack }: PdfViewerProps) {
           >
             <StickyNote className="w-4 h-4" />
           </button>
+
+          {/* Toggle chat panel */}
+          <button
+            onClick={() => {
+              setChatOpen(!chatOpen);
+              if (!chatOpen) setPanelOpen(false);
+            }}
+            className={`w-8 h-8 rounded-[8px] flex items-center justify-center transition-all ${
+              chatOpen
+                ? "bg-primary/10 text-primary"
+                : "hover:bg-secondary text-muted-foreground hover:text-foreground"
+            }`}
+            aria-label="Toggle AI chat panel"
+            title="Ask AI"
+          >
+            <MessageCircle className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -409,6 +443,7 @@ export function PdfViewer({ title, onBack }: PdfViewerProps) {
               <HighlightToolbar
                 position={selectionToolbar.position}
                 onAnnotate={(color, type, withNote) => handleCreateHighlight(color, type, withNote)}
+                onAskAI={handleAskAI}
               />
             )}
           </AnimatePresence>
@@ -438,6 +473,18 @@ export function PdfViewer({ title, onBack }: PdfViewerProps) {
               editingId={editingAnnotationId}
               onEditStart={setEditingAnnotationId}
               onEditEnd={() => setEditingAnnotationId(null)}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* AI Chat Panel (right sidebar) */}
+        <AnimatePresence>
+          {chatOpen && (
+            <PdfChatPanel
+              paperTitle={title}
+              pendingQuote={pendingQuote}
+              onClose={() => setChatOpen(false)}
+              onQuoteConsumed={() => setPendingQuote(null)}
             />
           )}
         </AnimatePresence>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, LayoutGrid, List, Library as LibraryIcon, Brain, X } from "lucide-react";
@@ -19,15 +19,18 @@ const PdfViewer = dynamic(
 
 type ViewMode = "grid" | "list";
 
-export default function LibraryPage() {
+function LibraryContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [papers, setPapers] = useState<PaperInfo[]>([]);
   const [totalChunks, setTotalChunks] = useState(0);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [isLoading, setIsLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
-  const [viewingPaper, setViewingPaper] = useState<string | null>(null);
+
+  // Derive viewingPaper from URL so it survives navigation
+  const viewingPaper = searchParams.get("paper");
 
   const fetchPapers = useCallback(async () => {
     setIsLoading(true);
@@ -83,11 +86,19 @@ export default function LibraryPage() {
     router.push(`/knowledge?papers=${encodeURIComponent(titles.join("||"))}`);
   };
 
+  const openPaper = (title: string) => {
+    router.push(`/library?paper=${encodeURIComponent(title)}`);
+  };
+
+  const closePaper = () => {
+    router.push("/library");
+  };
+
   // If viewing a PDF, show the inline viewer instead of the library list
   if (viewingPaper) {
     return (
       <div className="h-full flex flex-col">
-        <PdfViewer title={viewingPaper} onBack={() => setViewingPaper(null)} />
+        <PdfViewer title={viewingPaper} onBack={closePaper} />
       </div>
     );
   }
@@ -164,7 +175,7 @@ export default function LibraryPage() {
                   selected={selectedPapers.has(paper.title)}
                   onSelect={handleSelect}
                   onDelete={handleDelete}
-                  onView={(title) => setViewingPaper(title)}
+                  onView={(title) => openPaper(title)}
                 />
               ))}
             </AnimatePresence>
@@ -177,7 +188,7 @@ export default function LibraryPage() {
                   key={paper.title}
                   paper={paper}
                   onDelete={handleDelete}
-                  onView={(title) => setViewingPaper(title)}
+                  onView={(title) => openPaper(title)}
                 />
               ))}
             </AnimatePresence>
@@ -222,6 +233,15 @@ export default function LibraryPage() {
         onSuccess={handleUploadSuccess}
       />
     </div>
+  );
+}
+
+// Default export wraps in Suspense (required for useSearchParams in Next.js)
+export default function LibraryPage() {
+  return (
+    <Suspense fallback={<div className="h-full" />}>
+      <LibraryContent />
+    </Suspense>
   );
 }
 

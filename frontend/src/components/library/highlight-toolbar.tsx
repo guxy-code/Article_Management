@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { MessageSquarePlus, Highlighter, UnderlineIcon, Strikethrough } from "lucide-react";
+import { MessageSquarePlus, Highlighter, UnderlineIcon, Strikethrough, MessageCircle } from "lucide-react";
 
 type AnnotationType = "highlight" | "underline" | "strikethrough";
 
@@ -23,9 +23,10 @@ const TYPES: { type: AnnotationType; icon: React.ReactNode; label: string }[] = 
 interface HighlightToolbarProps {
   position: { x: number; y: number };
   onAnnotate: (color: string, type: AnnotationType, withNote: boolean) => void;
+  onAskAI: () => void;
 }
 
-export function HighlightToolbar({ position, onAnnotate }: HighlightToolbarProps) {
+export function HighlightToolbar({ position, onAnnotate, onAskAI }: HighlightToolbarProps) {
   const [selectedType, setSelectedType] = useState<AnnotationType>("highlight");
 
   return (
@@ -86,6 +87,19 @@ export function HighlightToolbar({ position, onAnnotate }: HighlightToolbarProps
         aria-label="Add note"
       >
         <MessageSquarePlus className="w-4 h-4" />
+      </button>
+
+      {/* Divider */}
+      <div className="w-px h-5 bg-border mx-0.5" />
+
+      {/* Ask AI */}
+      <button
+        onClick={onAskAI}
+        className="w-7 h-7 rounded-[8px] flex items-center justify-center hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all"
+        title="Ask AI about this"
+        aria-label="Ask AI"
+      >
+        <MessageCircle className="w-4 h-4" />
       </button>
     </motion.div>
   );
