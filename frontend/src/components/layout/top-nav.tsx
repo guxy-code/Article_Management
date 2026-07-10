@@ -192,7 +192,7 @@ export function TopNav() {
                     onClick={() => handleSelect(paper.title)}
                     className={`flex items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors ${
                       activeIndex === i
-                        ? "bg-primary/8 text-foreground"
+                        ? "bg-primary/10 text-foreground"
                         : "hover:bg-secondary"
                     }`}
                   >

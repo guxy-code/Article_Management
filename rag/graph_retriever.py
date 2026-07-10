@@ -39,6 +39,10 @@ class GraphRetriever:
         从问题中提取实体，查询图谱，返回格式化的关系知识字符串。
         如果没有相关图谱知识，返回空字符串。
         """
+        # 如果 Neo4j 不可用，直接跳过，避免浪费 LLM 调用
+        if not self.graph_store.available:
+            return ""
+
         # Step 1: 提取实体和判断问题类型
         extraction = self._extract_entities(question)
         entities = extraction.get("entities", [])
