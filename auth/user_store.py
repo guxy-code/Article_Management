@@ -14,7 +14,7 @@ from typing import Optional
 import bcrypt
 
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sessions.db")
+DB_PATH = os.getenv("DB_PATH") or os.path.join(os.path.dirname(os.path.dirname(__file__)), "sessions.db")
 
 
 def _pre_hash(password: str) -> bytes:

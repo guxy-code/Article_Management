@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# 系统依赖（bcrypt 编译需要 gcc）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libffi-dev && rm -rf /var/lib/apt/lists/*
+
+# 先装依赖（利用 Docker 层缓存，代码变更不重装）
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制源码
+COPY . .
+
+# 持久化数据目录
+RUN mkdir -p chroma_db uploaded_papers data
+
+EXPOSE 8000
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

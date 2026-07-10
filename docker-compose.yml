@@ -1,0 +1,59 @@
+services:
+  # ===== Neo4j 知识图谱（可选，后端会自动降级） =====
+  neo4j:
+    image: neo4j:5
+    container_name: papermind-neo4j
+    # 端口不映射到公网，仅容器间访问（安全加固）
+    # ports:
+    #   - "7687:7687"
+    #   - "7474:7474"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    environment:
+      - NEO4J_AUTH=neo4j/12345678
+    restart: unless-stopped
+
+  # ===== 后端 FastAPI =====
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: papermind-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/app/chroma_db          # ChromaDB 向量数据
+      - uploaded_papers:/app/uploaded_papers  # 用户上传的 PDF
+      - sqlite_data:/app/data               # SQLite 数据库
+    env_file: .env
+    environment:
+      # 容器间用服务名通信，覆盖 .env 中的 localhost
+      - NEO4J_URI=bolt://neo4j:7687
+      # SQLite 文件路径（放在持久化卷内）
+      - DB_PATH=/app/data/sessions.db
+    depends_on:
+      - neo4j
+    restart: unless-stopped
+
+  # ===== 前端 Next.js =====
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # 浏览器访问后端的地址（从用户浏览器视角）
+        - NEXT_PUBLIC_API_URL=http://159.75.206.214:8000
+    container_name: papermind-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  chroma_data:
+  uploaded_papers:
+  sqlite_data:
