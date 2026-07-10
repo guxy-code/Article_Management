@@ -33,6 +33,7 @@ class SessionStore:
                 id TEXT PRIMARY KEY,
                 title TEXT DEFAULT 'New Chat',
                 summary TEXT DEFAULT '',
+                user_id TEXT NOT NULL DEFAULT 'system',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -50,51 +51,72 @@ class SessionStore:
             CREATE INDEX IF NOT EXISTS idx_messages_session 
                 ON messages(session_id, created_at);
         """)
+        # 迁移：已有 sessions 表若无 user_id 列则补上
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'system'")
+            conn.commit()
+        except Exception:
+            pass  # 列已存在
+        # 迁移完成后再创建依赖 user_id 的索引
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, updated_at)")
         conn.commit()
         conn.close()
 
-    def create_session(self) -> dict:
+    def create_session(self, user_id: str = "system") -> dict:
         """创建新会话，返回会话信息"""
         session_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
         conn = self._get_conn()
         conn.execute(
-            "INSERT INTO sessions (id, title, summary, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (session_id, "New Chat", "", now, now),
+            "INSERT INTO sessions (id, title, summary, user_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, "New Chat", "", user_id, now, now),
         )
         conn.commit()
         conn.close()
         return {"id": session_id, "title": "New Chat", "summary": "", "created_at": now, "updated_at": now}
 
-    def list_sessions(self) -> list[dict]:
-        """列出所有会话，按更新时间倒序"""
+    def list_sessions(self, user_id: str = "system") -> list[dict]:
+        """列出该用户的所有会话，按更新时间倒序"""
         conn = self._get_conn()
         rows = conn.execute("""
             SELECT s.id, s.title, s.updated_at, s.created_at,
                    COUNT(m.id) as message_count
             FROM sessions s
             LEFT JOIN messages m ON m.session_id = s.id
+            WHERE s.user_id = ?
             GROUP BY s.id
             ORDER BY s.updated_at DESC
-        """).fetchall()
+        """, (user_id,)).fetchall()
         conn.close()
         return [dict(r) for r in rows]
 
-    def get_session(self, session_id: str) -> Optional[dict]:
-        """获取会话详情"""
+    def get_session(self, session_id: str, user_id: Optional[str] = None) -> Optional[dict]:
+        """获取会话详情，可选验证归属"""
         conn = self._get_conn()
-        row = conn.execute(
-            "SELECT * FROM sessions WHERE id = ?", (session_id,)
-        ).fetchone()
+        if user_id:
+            row = conn.execute(
+                "SELECT * FROM sessions WHERE id = ? AND user_id = ?",
+                (session_id, user_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
         conn.close()
         if row:
             return dict(row)
         return None
 
-    def delete_session(self, session_id: str) -> bool:
-        """删除会话及其所有消息"""
+    def delete_session(self, session_id: str, user_id: Optional[str] = None) -> bool:
+        """删除会话及其所有消息，可选验证归属"""
         conn = self._get_conn()
-        cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        if user_id:
+            cursor = conn.execute(
+                "DELETE FROM sessions WHERE id = ? AND user_id = ?",
+                (session_id, user_id),
+            )
+        else:
+            cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         conn.commit()
         conn.close()
         return cursor.rowcount > 0

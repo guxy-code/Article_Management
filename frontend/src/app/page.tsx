@@ -148,7 +148,7 @@ export default function HomePage() {
               <div className="flex items-end gap-3 h-28">
                 {uploadDays.map((day) => {
                   const maxCount = Math.max(...uploadDays.map(d => d.count), 1);
-                  const height = day.count > 0 ? Math.max((day.count / maxCount) * 100, 10) : 5;
+                  const height = day.count > 0 ? Math.max((day.count / maxCount) * 70, 8) : 2;
                   return (
                     <div key={day.date} className="flex-1 flex flex-col items-center gap-1.5 group">
                       <span className={`text-[10px] font-medium transition-all ${day.count > 0 ? "text-primary" : "text-transparent group-hover:text-muted-foreground"}`}>
@@ -157,7 +157,7 @@ export default function HomePage() {
                       <div className="w-full flex-1 flex items-end">
                         <div
                           className={`w-full rounded-t-[5px] transition-all duration-300 ${day.count > 0 ? "bg-primary/50 group-hover:bg-primary" : "bg-secondary group-hover:bg-secondary"}`}
-                          style={{ height: `${height}%` }}
+                          style={{ height: `${height}px` }}
                         />
                       </div>
                       <span className="text-[9px] text-muted-foreground">{day.label}</span>

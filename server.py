@@ -17,9 +17,10 @@ load_dotenv()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from parsers import get_parser
@@ -36,6 +37,8 @@ from graph.neo4j_store import GraphStore
 from graph.extractor import KnowledgeExtractor
 from recommend.semantic_scholar import search_papers, get_recommendation_keywords
 from recommend.ccf_mapper import CCFMapper
+from auth.user_store import UserStore
+from auth.jwt_handler import create_access_token, decode_token
 
 
 # ========== 初始化 ==========
@@ -59,6 +62,15 @@ app.add_middleware(
 vector_store = VectorStore()
 session_store = SessionStore()
 annotation_store = AnnotationStore()
+user_store = UserStore()
+
+# 认证依赖
+_security = HTTPBearer()
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(_security)) -> str:
+    """解码 JWT，返回 user_id；失败自动 401"""
+    payload = decode_token(credentials.credentials)
+    return payload["sub"]
 
 # 构建 BM25 索引（从 Chroma 加载已有文档）
 bm25_store = BM25Store()
@@ -110,8 +122,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 UPLOAD_LOG = os.path.join(os.path.dirname(__file__), "upload_log.json")
 
 
-def _log_upload(title: str):
-    """记录上传时间"""
+def _log_upload(title: str, user_id: str = "system"):
+    """记录上传时间（按用户）"""
     import json
     from datetime import datetime
     try:
@@ -120,11 +132,30 @@ def _log_upload(title: str):
                 logs = json.load(f)
         else:
             logs = []
-        logs.append({"title": title, "date": datetime.now().strftime("%Y-%m-%d")})
+        logs.append({"title": title, "date": datetime.now().strftime("%Y-%m-%d"), "user_id": user_id})
         with open(UPLOAD_LOG, "w", encoding="utf-8") as f:
             json.dump(logs, f, ensure_ascii=False)
     except Exception:
         pass
+
+
+# ========== 工具函数 ==========
+
+def validate_password_strength(password: str) -> str | None:
+    """
+    校验密码强度：至少 6 位，且包含大写字母、小写字母、数字、特殊字符四种类型中的至少两种。
+    返回 None 表示通过，返回字符串为错误提示。
+    """
+    if len(password) < 6:
+        return "密码至少 6 位"
+    has_upper = any(c.isupper() for c in password)
+    has_lower = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    has_special = any(not c.isalnum() for c in password)
+    types_count = sum([has_upper, has_lower, has_digit, has_special])
+    if types_count < 2:
+        return "密码需包含大写字母、小写字母、数字、特殊字符中的至少两种"
+    return None
 
 
 # ========== 请求/响应模型 ==========
@@ -147,6 +178,10 @@ class ChatResponse(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     k: int = 5
+
+
+class PapersGraphRequest(BaseModel):
+    titles: list[str]
 
 
 class SearchResult(BaseModel):
@@ -199,31 +234,138 @@ async def root():
     return {"status": "ok", "service": "PaperMind API", "version": "2.0.0"}
 
 
+# ========== 认证 ==========
+
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    email: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AuthResponse(BaseModel):
+    token: str
+    user: dict
+
+
+@app.post("/api/auth/register", response_model=AuthResponse)
+async def register(data: RegisterRequest):
+    """注册新用户"""
+    if len(data.username.strip()) < 2:
+        raise HTTPException(status_code=400, detail="用户名至少 2 个字符")
+    pwd_error = validate_password_strength(data.password)
+    if pwd_error:
+        raise HTTPException(status_code=400, detail=pwd_error)
+    try:
+        user = user_store.create_user(
+            username=data.username.strip(),
+            password=data.password,
+            email=data.email,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    token = create_access_token(user["id"], user["username"])
+    return AuthResponse(token=token, user={"id": user["id"], "username": user["username"]})
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def login(data: LoginRequest):
+    """用户登录，返回 JWT token"""
+    db_user = user_store.get_user_by_username(data.username)
+    if not db_user or not user_store.verify_password(data.password, db_user["password_hash"]):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    token = create_access_token(db_user["id"], db_user["username"])
+    return AuthResponse(
+        token=token,
+        user={"id": db_user["id"], "username": db_user["username"]},
+    )
+
+
+@app.get("/api/auth/me")
+async def get_me(user_id: str = Depends(get_current_user)):
+    """获取当前用户信息"""
+    user = user_store.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return user
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+
+
+@app.put("/api/auth/password")
+async def change_password(data: ChangePasswordRequest, user_id: str = Depends(get_current_user)):
+    """修改密码"""
+    db_user = user_store.get_user_by_id(user_id)
+    if not db_user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    # 获取完整用户信息（含密码哈希）用于验证旧密码
+    full_user = user_store.get_user_by_username(db_user["username"])
+    if not full_user or not user_store.verify_password(data.current_password, full_user["password_hash"]):
+        raise HTTPException(status_code=401, detail="当前密码错误")
+
+    pwd_error = validate_password_strength(data.new_password)
+    if pwd_error:
+        raise HTTPException(status_code=400, detail=pwd_error)
+
+    user_store.update_password(user_id, data.new_password)
+    return {"status": "success", "message": "密码修改成功"}
+
+
+@app.put("/api/auth/profile")
+async def update_profile(data: UpdateProfileRequest, user_id: str = Depends(get_current_user)):
+    """修改用户名/邮箱，返回新 token"""
+    try:
+        updated = user_store.update_user_info(user_id, username=data.username, email=data.email)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    # 用户名可能变了，签发新 token
+    token = create_access_token(updated["id"], updated["username"])
+    return {
+        "token": token,
+        "user": {"id": updated["id"], "username": updated["username"], "email": updated.get("email")},
+    }
+
+
 # ========== 会话管理 ==========
 
 @app.post("/api/sessions", response_model=dict)
-async def create_session():
+async def create_session(user_id: str = Depends(get_current_user)):
     """创建新会话"""
-    session = session_store.create_session()
+    session = session_store.create_session(user_id=user_id)
     return session
 
 
 @app.get("/api/sessions", response_model=list[SessionInfo])
-async def list_sessions():
-    """列出所有会话"""
-    sessions = session_store.list_sessions()
+async def list_sessions(user_id: str = Depends(get_current_user)):
+    """列出当前用户的所有会话"""
+    sessions = session_store.list_sessions(user_id=user_id)
     return sessions
 
 
 @app.get("/api/sessions/{session_id}", response_model=SessionDetail)
-async def get_session(session_id: str):
+async def get_session(session_id: str, user_id: str = Depends(get_current_user)):
     """获取会话详情（含全部消息）"""
-    session = session_store.get_session(session_id)
+    session = session_store.get_session(session_id, user_id=user_id)
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在")
 
     messages = session_store.get_messages(session_id)
-    # 解析 sources JSON
     for msg in messages:
         if msg.get("sources"):
             try:
@@ -244,9 +386,9 @@ async def get_session(session_id: str):
 
 
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str):
+async def delete_session(session_id: str, user_id: str = Depends(get_current_user)):
     """删除会话"""
-    success = session_store.delete_session(session_id)
+    success = session_store.delete_session(session_id, user_id=user_id)
     if success:
         return {"status": "success", "message": "会话已删除"}
     else:
@@ -259,14 +401,17 @@ async def delete_session(session_id: str):
 async def upload_paper(
     file: UploadFile = File(...),
     title: Optional[str] = Form(None),
+    user_id: str = Depends(get_current_user),
 ):
-    """
-    上传 PDF 论文并入库。
-    """
+    """上传 PDF 论文并入库"""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
 
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    # 按用户分目录存储
+    user_dir = os.path.join(UPLOAD_DIR, user_id)
+    os.makedirs(user_dir, exist_ok=True)
+    file_path = os.path.join(user_dir, file.filename)
+
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
@@ -286,7 +431,7 @@ async def upload_paper(
         paper_title = metadata["title"] or os.path.splitext(file.filename)[0]
         paper_authors = metadata["authors"] or "unknown"
 
-    if vector_store.has_paper(paper_title):
+    if vector_store.has_paper(paper_title, user_id=user_id):
         return {
             "status": "exists",
             "message": f"论文《{paper_title}》已在知识库中",
@@ -294,7 +439,6 @@ async def upload_paper(
         }
 
     chunks = split_text(result.text, chunk_size=800, chunk_overlap=100)
-
     if not chunks:
         raise HTTPException(status_code=422, detail="论文内容为空，无法入库")
 
@@ -303,6 +447,7 @@ async def upload_paper(
         title=paper_title,
         authors=paper_authors,
         source_path=file_path,
+        user_id=user_id,
     )
 
     # 同步更新 BM25 索引
@@ -310,24 +455,23 @@ async def upload_paper(
     bm25_docs = [
         LCDocument(
             page_content=chunk,
-            metadata={"title": paper_title, "authors": paper_authors, "chunk_index": i},
+            metadata={"title": paper_title, "authors": paper_authors,
+                      "chunk_index": i, "user_id": user_id},
         )
         for i, chunk in enumerate(chunks)
     ]
     bm25_store.add_documents(bm25_docs)
 
-    # 知识图谱提取 + 写入 Neo4j
+    # 知识图谱提取
     try:
         graph_data = knowledge_extractor.extract(
             result.text[:3000], title=paper_title, authors=paper_authors
         )
-        graph_store.add_paper_graph(graph_data)
+        graph_store.add_paper_graph(graph_data, user_id=user_id)
     except Exception as e:
-        # 图谱提取失败不影响主流程
         print(f"⚠️ 知识图谱提取失败: {e}")
 
-    # 记录上传日志
-    _log_upload(paper_title)
+    _log_upload(paper_title, user_id=user_id)
 
     return {
         "status": "success",
@@ -340,8 +484,8 @@ async def upload_paper(
 
 
 @app.get("/api/papers/upload-history")
-async def get_upload_history():
-    """获取最近 7 天每天上传论文数量"""
+async def get_upload_history(user_id: str = Depends(get_current_user)):
+    """获取当前用户最近 7 天每天上传论文数量"""
     from datetime import datetime, timedelta
     try:
         if os.path.exists(UPLOAD_LOG):
@@ -350,13 +494,13 @@ async def get_upload_history():
         else:
             logs = []
 
-        # 统计最近 7 天
         today = datetime.now().date()
         days = []
         for i in range(6, -1, -1):
             d = today - timedelta(days=i)
             date_str = d.strftime("%Y-%m-%d")
-            count = sum(1 for log in logs if log.get("date") == date_str)
+            count = sum(1 for log in logs
+                        if log.get("date") == date_str and log.get("user_id", "system") == user_id)
             days.append({"date": date_str, "label": d.strftime("%m/%d"), "count": count})
 
         return {"days": days}
@@ -365,13 +509,13 @@ async def get_upload_history():
 
 
 @app.get("/api/papers", response_model=PaperListResponse)
-async def list_papers():
-    """列出所有已入库论文"""
-    titles = vector_store.list_papers()
+async def list_papers(user_id: str = Depends(get_current_user)):
+    """列出当前用户已入库论文"""
+    titles = vector_store.list_papers(user_id=user_id)
 
     papers = []
     for t in titles:
-        paper_chunks = vector_store.get_paper_chunks(t)
+        paper_chunks = vector_store.get_paper_chunks(t, user_id=user_id)
         authors = "unknown"
         source = ""
         if paper_chunks:
@@ -379,24 +523,28 @@ async def list_papers():
             authors = meta.get("authors", "unknown")
             source = meta.get("source", "")
 
-        papers.append(PaperInfo(
-            title=t,
-            authors=authors,
-            chunks=len(paper_chunks),
-            source=source,
-        ))
+        papers.append(PaperInfo(title=t, authors=authors, chunks=len(paper_chunks), source=source))
 
-    return PaperListResponse(
-        papers=papers,
-        total=len(papers),
-        total_chunks=vector_store.total_chunks,
-    )
+    return PaperListResponse(papers=papers, total=len(papers), total_chunks=vector_store.total_chunks)
 
 
 @app.get("/api/papers/{title}/pdf")
-async def get_paper_pdf(title: str):
-    """根据论文标题获取 PDF 文件"""
-    paper_chunks = vector_store.get_paper_chunks(title)
+async def get_paper_pdf(title: str, token: Optional[str] = None,
+                         user_id: Optional[str] = None):
+    """根据论文标题获取 PDF 文件（支持 header Bearer 或 ?token= query param）"""
+    # 优先从 Authorization header 拿，其次从 query param
+    if user_id is None:
+        if token:
+            try:
+                from auth.jwt_handler import decode_token as _decode
+                payload = _decode(token)
+                user_id = payload["sub"]
+            except Exception:
+                raise HTTPException(status_code=401, detail="token 无效")
+        else:
+            raise HTTPException(status_code=401, detail="需要认证")
+
+    paper_chunks = vector_store.get_paper_chunks(title, user_id=user_id)
     if not paper_chunks:
         raise HTTPException(status_code=404, detail=f"未找到论文《{title}》")
 
@@ -404,25 +552,20 @@ async def get_paper_pdf(title: str):
     if not source or not os.path.isfile(source):
         raise HTTPException(status_code=404, detail="PDF 文件不存在或已被删除")
 
-    # 安全校验：确保路径在 UPLOAD_DIR 内
     real_source = os.path.realpath(source)
-    real_upload_dir = os.path.realpath(UPLOAD_DIR)
-    if not real_source.startswith(real_upload_dir):
+    real_user_dir = os.path.realpath(os.path.join(UPLOAD_DIR, user_id))
+    if not real_source.startswith(real_user_dir):
         raise HTTPException(status_code=403, detail="访问被拒绝")
 
-    return FileResponse(
-        real_source,
-        media_type="application/pdf",
-        filename=os.path.basename(real_source),
-    )
+    return FileResponse(real_source, media_type="application/pdf",
+                        filename=os.path.basename(real_source))
 
 
 @app.delete("/api/papers/{title}")
-async def delete_paper(title: str):
+async def delete_paper(title: str, user_id: str = Depends(get_current_user)):
     """删除一篇论文"""
-    success = vector_store.delete_paper(title)
+    success = vector_store.delete_paper(title, user_id=user_id)
     if success:
-        # 同步更新 BM25 索引
         bm25_store.remove_by_title(title)
         return {"status": "success", "message": f"已删除《{title}》"}
     else:
@@ -447,14 +590,14 @@ class AnnotationUpdate(BaseModel):
 
 
 @app.get("/api/annotations/{paper_title}")
-async def get_annotations(paper_title: str):
-    """获取某篇论文的所有标注"""
-    annotations = annotation_store.list_by_paper(paper_title)
+async def get_annotations(paper_title: str, user_id: str = Depends(get_current_user)):
+    """获取某篇论文当前用户的所有标注"""
+    annotations = annotation_store.list_by_paper(paper_title, user_id=user_id)
     return {"annotations": annotations}
 
 
 @app.post("/api/annotations")
-async def create_annotation(data: AnnotationCreate):
+async def create_annotation(data: AnnotationCreate, user_id: str = Depends(get_current_user)):
     """创建标注"""
     annotation = annotation_store.create(
         paper_title=data.paper_title,
@@ -464,23 +607,26 @@ async def create_annotation(data: AnnotationCreate):
         color=data.color,
         type=data.type,
         rects=data.rects,
+        user_id=user_id,
     )
     return annotation
 
 
 @app.put("/api/annotations/{annotation_id}")
-async def update_annotation(annotation_id: str, data: AnnotationUpdate):
+async def update_annotation(annotation_id: str, data: AnnotationUpdate,
+                             user_id: str = Depends(get_current_user)):
     """更新标注"""
-    success = annotation_store.update(annotation_id, note=data.note, color=data.color)
+    success = annotation_store.update(annotation_id, note=data.note, color=data.color,
+                                       user_id=user_id)
     if not success:
         raise HTTPException(status_code=404, detail="标注不存在")
     return {"status": "success"}
 
 
 @app.delete("/api/annotations/{annotation_id}")
-async def delete_annotation(annotation_id: str):
+async def delete_annotation(annotation_id: str, user_id: str = Depends(get_current_user)):
     """删除标注"""
-    success = annotation_store.delete(annotation_id)
+    success = annotation_store.delete(annotation_id, user_id=user_id)
     if not success:
         raise HTTPException(status_code=404, detail="标注不存在")
     return {"status": "success"}
@@ -489,24 +635,19 @@ async def delete_annotation(annotation_id: str):
 # ========== 问答与检索 ==========
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    """
-    RAG 问答。
-
-    - 如果提供 session_id，使用多轮对话模式（带历史、Query 改写）
-    - 如果不提供 session_id，使用单次问答模式（向后兼容）
-    """
+async def chat(request: ChatRequest, user_id: str = Depends(get_current_user)):
+    """RAG 问答"""
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
 
     question = request.question.strip()
 
     if request.session_id:
-        # 多轮对话模式
         result = qa_chain.ask_with_session(
             question=question,
             session_id=request.session_id,
             k=request.k,
+            user_id=user_id,
         )
         return ChatResponse(
             answer=result["answer"],
@@ -515,31 +656,17 @@ async def chat(request: ChatRequest):
             rewritten_query=result.get("rewritten_query"),
         )
     else:
-        # 单次问答模式（向后兼容）
         result = qa_chain.ask_with_sources(question, k=request.k)
-        return ChatResponse(
-            answer=result["answer"],
-            sources=result["sources"],
-        )
+        return ChatResponse(answer=result["answer"], sources=result["sources"])
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(request: ChatRequest):
-    """
-    流式 RAG 问答（SSE）。
-
-    前置步骤（改写、检索、rerank）阻塞执行后，LLM 生成阶段逐 token 返回。
-
-    事件格式：
-    data: {"type": "sources", "data": [...]}
-    data: {"type": "token", "data": "字"}
-    data: {"type": "done", "data": "完整回答"}
-    """
+async def chat_stream(request: ChatRequest, user_id: str = Depends(get_current_user)):
+    """流式 RAG 问答（SSE）"""
     from fastapi.responses import StreamingResponse
 
     if not request.question.strip():
         raise HTTPException(status_code=400, detail="问题不能为空")
-
     if not request.session_id:
         raise HTTPException(status_code=400, detail="流式模式需要提供 session_id")
 
@@ -552,57 +679,51 @@ async def chat_stream(request: ChatRequest):
             k=request.k,
             paper_title=request.paper_title,
             paper_titles=request.paper_titles,
+            user_id=user_id,
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
     )
 
 
 @app.post("/api/search", response_model=SearchResponse)
-async def search(request: SearchRequest):
-    """语义检索：在知识库中搜索相关论文片段。"""
+async def search(request: SearchRequest, user_id: str = Depends(get_current_user)):
+    """语义检索"""
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="搜索内容不能为空")
 
-    docs = vector_store.search(request.query.strip(), k=request.k)
+    docs = vector_store.search(request.query.strip(), k=request.k, user_id=user_id)
 
-    results = []
-    for doc in docs:
-        results.append(SearchResult(
+    results = [
+        SearchResult(
             content=doc.page_content,
             title=doc.metadata.get("title", "未知"),
             authors=doc.metadata.get("authors", "unknown"),
             chunk_index=doc.metadata.get("chunk_index", -1),
-        ))
-
+        )
+        for doc in docs
+    ]
     return SearchResponse(results=results, total=len(results))
 
 
 # ========== 知识图谱 ==========
 
 @app.get("/api/graph")
-async def get_graph():
-    """获取完整知识图谱（所有节点和边）"""
+async def get_graph(user_id: str = Depends(get_current_user)):
     try:
-        data = graph_store.get_full_graph()
-        return data
+        return graph_store.get_full_graph(user_id=user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"图谱查询失败: {str(e)}")
 
 
 @app.get("/api/graph/paper/{title}")
-async def get_paper_graph(title: str):
-    """获取某篇论文相关的子图"""
+async def get_paper_graph(title: str, user_id: str = Depends(get_current_user)):
     try:
-        data = graph_store.get_paper_subgraph(title)
+        data = graph_store.get_paper_subgraph(title, user_id=user_id)
         if not data["nodes"]:
             raise HTTPException(status_code=404, detail=f"未找到论文《{title}》的图谱数据")
         return data
@@ -613,116 +734,87 @@ async def get_paper_graph(title: str):
 
 
 @app.get("/api/graph/stats")
-async def get_graph_stats():
-    """获取图谱统计信息"""
+async def get_graph_stats(user_id: str = Depends(get_current_user)):
     try:
-        return graph_store.get_stats()
+        return graph_store.get_stats(user_id=user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"统计查询失败: {str(e)}")
 
 
 @app.get("/api/graph/keywords")
-async def get_keyword_graph():
-    """获取关键词关联图（Paper + Concept 二部图）"""
+async def get_keyword_graph(user_id: str = Depends(get_current_user)):
     try:
-        data = graph_store.get_keyword_graph()
-        return data
+        return graph_store.get_keyword_graph(user_id=user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"关键词图谱查询失败: {str(e)}")
 
 
-class PapersGraphRequest(BaseModel):
-    titles: list[str]
-
-
 @app.post("/api/graph/papers")
-async def get_papers_graph(request: PapersGraphRequest):
-    """获取多篇论文的合并子图"""
+async def get_papers_graph(request: PapersGraphRequest, user_id: str = Depends(get_current_user)):
     if not request.titles:
         raise HTTPException(status_code=400, detail="请提供至少一篇论文标题")
     try:
-        data = graph_store.get_papers_subgraph(request.titles)
-        return data
+        return graph_store.get_papers_subgraph(request.titles, user_id=user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"图谱查询失败: {str(e)}")
 
 
 @app.get("/api/graph/concepts")
-async def get_concepts():
-    """获取所有概念关键词"""
+async def get_concepts(user_id: str = Depends(get_current_user)):
     try:
-        concepts = graph_store.get_all_concepts()
-        return {"concepts": concepts}
+        return {"concepts": graph_store.get_all_concepts(user_id=user_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
 @app.get("/api/graph/concept-frequency")
-async def get_concept_frequency():
-    """获取概念被引用频率（按论文数降序）"""
+async def get_concept_frequency(user_id: str = Depends(get_current_user)):
     try:
-        data = graph_store.get_concept_frequency()
-        return {"concepts": data}
+        return {"concepts": graph_store.get_concept_frequency(user_id=user_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
 @app.get("/api/graph/method-evolution")
-async def get_method_evolution():
-    """获取方法改进关系"""
+async def get_method_evolution(user_id: str = Depends(get_current_user)):
     try:
-        data = graph_store.get_method_evolution()
-        return {"relations": data}
+        return {"relations": graph_store.get_method_evolution(user_id=user_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
 @app.get("/api/graph/problems-solutions")
-async def get_problems_solutions():
-    """获取论文解决的问题"""
+async def get_problems_solutions(user_id: str = Depends(get_current_user)):
     try:
-        data = graph_store.get_problems_solutions()
-        return {"data": data}
+        return {"data": graph_store.get_problems_solutions(user_id=user_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
 @app.get("/api/graph/papers-with-concepts")
-async def get_papers_with_concepts():
-    """获取所有论文及其关键词概念"""
+async def get_papers_with_concepts(user_id: str = Depends(get_current_user)):
     try:
-        data = graph_store.get_papers_with_concepts()
-        return {"papers": data}
+        return {"papers": graph_store.get_papers_with_concepts(user_id=user_id)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
 
 
 @app.post("/api/graph/extract/{title}")
-async def reextract_graph(title: str):
-    """
-    对某篇已入库论文重新运行知识图谱提取并写入 Neo4j。
-    适用于首次提取失败、或图谱数据为空的情况。
-    """
+async def reextract_graph(title: str, user_id: str = Depends(get_current_user)):
+    """对某篇已入库论文重新运行知识图谱提取"""
     if not graph_store.available:
-        raise HTTPException(status_code=503, detail="Neo4j 服务不可用，请检查连接配置")
+        raise HTTPException(status_code=503, detail="Neo4j 服务不可用")
 
-    # 从向量库获取该论文的文本（取前几个 chunk 拼接）
-    paper_chunks = vector_store.get_paper_chunks(title)
+    paper_chunks = vector_store.get_paper_chunks(title, user_id=user_id)
     if not paper_chunks:
         raise HTTPException(status_code=404, detail=f"未找到论文《{title}》，请先上传")
 
-    # 拼接前几个 chunk（取前 3000 字符）
-    combined_text = "\n\n".join(
-        chunk.page_content for chunk in paper_chunks[:5]
-    )[:3000]
-
+    combined_text = "\n\n".join(chunk.page_content for chunk in paper_chunks[:5])[:3000]
     authors = paper_chunks[0].metadata.get("authors", "unknown")
 
     try:
-        graph_data = knowledge_extractor.extract(
-            combined_text, title=title, authors=authors
-        )
-        graph_store.add_paper_graph(graph_data)
+        graph_data = knowledge_extractor.extract(combined_text, title=title, authors=authors)
+        graph_store.add_paper_graph(graph_data, user_id=user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"知识图谱提取失败: {str(e)}")
 
@@ -738,38 +830,24 @@ async def reextract_graph(title: str):
 # ========== 论文推荐 ==========
 
 @app.get("/api/recommend")
-async def recommend_papers(range: str = "1year", level: str = "all"):
-    """
-    基于用户研究方向推荐最新论文。
-
-    Query params:
-        range: "1year" / "6months" / "3months"
-        level: "all" / "A" / "B" / "C"
-    """
+async def recommend_papers(range: str = "1year", level: str = "all",
+                            user_id: str = Depends(get_current_user)):
+    """基于用户研究方向推荐最新论文"""
     from datetime import datetime
 
-    # 1. 获取推荐关键词
-    keywords = get_recommendation_keywords(graph_store)
+    keywords = get_recommendation_keywords(graph_store, user_id=user_id)
     if not keywords:
         return {"papers": [], "keywords": [], "message": "请先上传论文以生成研究画像"}
 
-    # 2. 计算时间范围
     current_year = datetime.now().year
-    range_map = {
-        "1year": current_year - 1,
-        "6months": current_year,
-        "3months": current_year,
-    }
+    range_map = {"1year": current_year - 1, "6months": current_year, "3months": current_year}
     year_from = range_map.get(range, current_year - 1)
 
-    # 3. 调 Semantic Scholar
     results = search_papers(keywords, year_from=year_from, limit=20)
 
-    # 4. 附加 CCF 等级
     for paper in results:
         paper["ccf_level"] = ccf_mapper.get_level(paper.get("venue", ""))
 
-    # 5. 按等级过滤
     if level != "all":
         results = [p for p in results if p.get("ccf_level") == level.upper()]
 

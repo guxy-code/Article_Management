@@ -51,14 +51,14 @@ function computeLayout(
     type: string;
   }
 
-  const simNodes: SimNode[] = graphNodes.map((n) => ({
+  const simNodes: SimNode[] = graphNodes.filter((n) => n).map((n) => ({
     id: n.id,
     type: n.type,
     x: Math.random() * 800,
     y: Math.random() * 600,
   }));
 
-  const simLinks: SimulationLinkDatum<SimNode>[] = graphEdges.map((e) => ({
+  const simLinks: SimulationLinkDatum<SimNode>[] = graphEdges.filter((e) => e).map((e) => ({
     source: e.source,
     target: e.target,
   }));
@@ -153,7 +153,7 @@ function KnowledgeContent() {
     const positions = computeLayout(graphNodes, graphEdges);
     const posMap = new Map(positions.map((p) => [p.id, { x: p.x, y: p.y }]));
 
-    const rfNodes: Node[] = graphNodes.map((node) => {
+    const rfNodes: Node[] = graphNodes.filter((n) => n).map((node) => {
       const pos = posMap.get(node.id) || { x: 0, y: 0 };
       const cfg = TYPE_CONFIG[node.type] || { color: "#6B7280", size: 36 };
       const label = truncateLabel(node.label);
@@ -183,7 +183,7 @@ function KnowledgeContent() {
       };
     });
 
-    const rfEdges: Edge[] = graphEdges.map((e, i) => ({
+    const rfEdges: Edge[] = graphEdges.filter((e) => e).map((e, i) => ({
       id: `e-${i}`,
       source: e.source,
       target: e.target,

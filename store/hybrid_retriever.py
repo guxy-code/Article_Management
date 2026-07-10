@@ -30,38 +30,33 @@ class HybridRetriever:
         k: int = 5,
         filter_title: Optional[str] = None,
         filter_titles: Optional[list[str]] = None,
+        user_id: Optional[str] = None,
         use_rerank: bool = True,
     ) -> list[Document]:
         """
-        完整混合检索流程：
-
-        1. 向量检索 top-N（可带 metadata filter）
-        2. BM25 检索 top-N
-        3. RRF 融合
-        4. 可选 LLM 重排序
-        5. 返回 top-k
+        完整混合检索流程：向量 + BM25 + RRF + 重排序。
 
         Args:
-            query: 检索查询（应为经过 query rewrite 的独立查询）
+            query: 检索查询
             k: 最终返回结果数
             filter_title: 单篇论文过滤（向后兼容）
             filter_titles: 多篇论文过滤列表，优先级高于 filter_title
+            user_id: 用户 ID，限定只检索该用户的文档
             use_rerank: 是否启用重排序
-
-        Returns:
-            最终 top-k 文档列表
         """
-        fetch_k = k * 4  # 粗筛数量
+        fetch_k = k * 4
 
-        # 合并 filter_title / filter_titles 为统一的 titles 列表
+        # 合并 filter_title / filter_titles
         effective_titles: Optional[list[str]] = None
         if filter_titles:
             effective_titles = filter_titles
         elif filter_title:
             effective_titles = [filter_title]
 
-        # 构建 Chroma filter
-        title_filter = self.vector_store.build_title_filter(effective_titles) if effective_titles else None
+        # 构建 Chroma filter（含 user_id）
+        title_filter = self.vector_store.build_title_filter(effective_titles, user_id=user_id) if effective_titles else (
+            {"user_id": user_id} if user_id else None
+        )
 
         # 1. 向量检索
         if title_filter:
@@ -71,16 +66,17 @@ class HybridRetriever:
         else:
             vector_results = self.vector_store.search(query, k=fetch_k)
 
-        # 2. BM25 检索（全库，后续 RRF 融合时自然排序会体现相关性）
+        # 2. BM25 检索
         bm25_results_with_scores = self.bm25_store.search(query, k=fetch_k)
         bm25_results = [doc for doc, _ in bm25_results_with_scores]
 
-        # 如果有论文过滤，对 BM25 结果也做同样过滤
-        if effective_titles:
-            titles_set = set(effective_titles)
+        # BM25 结果按 user_id 和 title 过滤
+        if user_id or effective_titles:
+            titles_set = set(effective_titles) if effective_titles else None
             bm25_results = [
                 doc for doc in bm25_results
-                if doc.metadata.get("title") in titles_set
+                if (not user_id or doc.metadata.get("user_id") == user_id)
+                and (not titles_set or doc.metadata.get("title") in titles_set)
             ]
 
         # 3. RRF 融合

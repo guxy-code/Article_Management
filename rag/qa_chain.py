@@ -176,13 +176,17 @@ class PaperQAChain:
 
         return {"answer": answer, "sources": sources}
 
-    def ask_with_session(self, question: str, session_id: str, k: int = 5, paper_title: Optional[str] = None, paper_titles: Optional[list[str]] = None) -> dict:
+    def ask_with_session(self, question: str, session_id: str, k: int = 5,
+                         paper_title: Optional[str] = None,
+                         paper_titles: Optional[list[str]] = None,
+                         user_id: Optional[str] = None) -> dict:
         """
         多轮对话 RAG 问答。
 
         Args:
             paper_title: 单篇论文过滤（来自 PDF 阅读器，向后兼容）
             paper_titles: 多篇论文过滤列表（来自 Chat 页面的论文选择器）
+            user_id: 当前用户 ID，用于数据隔离
         """
         # 合并：paper_title 优先（PDF 阅读器场景），然后是 paper_titles
         effective_titles: Optional[list[str]] = None
@@ -192,159 +196,9 @@ class PaperQAChain:
             effective_titles = paper_titles
 
         # 1. 获取会话历史和摘要
-        session = self.session_store.get_session(session_id)
+        session = self.session_store.get_session(session_id, user_id)
         if not session:
             return self.ask_with_sources(question, k=k)
-
-        messages = self.session_store.get_messages(session_id)
-        summary = session.get("summary", "")
-
-        # 2. Query 改写（同时提取论文限定）
-        recent_for_rewrite = self.memory.format_for_rewrite(messages, max_turns=2)
-        rewrite_result = self.query_rewriter.rewrite(question, recent_for_rewrite)
-        rewritten_query = rewrite_result["query"]
-        # 显式传入的 paper_title/titles 优先级高于 query rewriter 猜测的
-        if not effective_titles:
-            filter_hint = rewrite_result.get("filter_title")
-            if filter_hint:
-                effective_titles = [filter_hint]
-
-        # 3. 检索（优先用混合检索器）
-        if self.hybrid_retriever:
-            docs = self.hybrid_retriever.search(
-                rewritten_query, k=k, filter_titles=effective_titles
-            )
-        else:
-            title_filter = (
-                self.vector_store.build_title_filter(effective_titles)
-                if effective_titles else None
-            )
-            if title_filter:
-                docs = self.vector_store.search_with_filter(
-                    rewritten_query, k=k, filter_dict=title_filter
-                )
-            else:
-                docs = self.vector_store.search(rewritten_query, k=k)
-
-        if not docs:
-            answer = "📭 知识库为空或未找到相关内容。请先上传论文。"
-            self.session_store.add_message(session_id, "user", question)
-            self.session_store.add_message(session_id, "assistant", answer, "[]")
-            if len(messages) == 0:
-                self.session_store.update_title(session_id, question[:40])
-            return {"answer": answer, "sources": [], "rewritten_query": rewritten_query}
-
-        # 4. Budget 分配
-        chunks_text = self._format_context(docs)
-        budget = self.memory.calculate_budget(chunks_text)
-
-        # 5. 格式化历史
-        chat_history = self.memory.format_for_prompt(
-            messages, summary, budget["history_budget"]
-        )
-
-        # 6. 图谱增强检索
-        graph_context = ""
-        if self.graph_retriever:
-            try:
-                graph_context = self.graph_retriever.retrieve(question)
-            except Exception:
-                graph_context = ""
-
-        # paper_scope 提示
-        if paper_title:
-            paper_scope = (
-                f"\n**当前阅读论文：** 用户正在阅读《{paper_title}》，请优先针对该论文回答，代词如'这个方法'、'该算法'均指该论文中的内容。\n"
-            )
-        elif effective_titles and len(effective_titles) > 0:
-            titles_str = "、".join(f"《{t}》" for t in effective_titles)
-            paper_scope = f"\n**检索范围限定：** 用户已将检索范围限定在以下论文：{titles_str}，请优先从这些论文中回答。\n"
-        else:
-            paper_scope = ""
-
-        # 7. LLM 生成回答
-        if chat_history:
-            answer = self.conv_chain.invoke({
-                "chat_history": chat_history,
-                "graph_context": graph_context,
-                "context": chunks_text,
-                "question": question,
-                "paper_scope": paper_scope,
-            })
-        else:
-            answer = self.chain.invoke({
-                "graph_context": graph_context,
-                "context": chunks_text,
-                "question": question,
-                "paper_scope": paper_scope,
-            })
-
-        # 构建 sources
-        sources = [
-            {
-                "title": doc.metadata.get("title", "未知"),
-                "chunk_index": doc.metadata.get("chunk_index", -1),
-                "content_preview": doc.page_content[:150] + "...",
-            }
-            for doc in docs
-        ]
-
-        # 8. 存储本轮 Q&A
-        self.session_store.add_message(session_id, "user", question)
-        self.session_store.add_message(
-            session_id, "assistant", answer, json.dumps(sources, ensure_ascii=False)
-        )
-
-        if len(messages) == 0:
-            title = question[:40] + ("..." if len(question) > 40 else "")
-            self.session_store.update_title(session_id, title)
-
-        new_message_count = len(messages) + 2
-        if self.memory.should_update_summary(new_message_count):
-            all_messages = self.session_store.get_messages(session_id)
-            new_summary = self.memory.generate_summary(all_messages)
-            if new_summary:
-                self.session_store.update_summary(session_id, new_summary)
-
-        return {
-            "answer": answer,
-            "sources": sources,
-            "rewritten_query": rewritten_query,
-        }
-
-    def _format_context(self, docs: list[Document]) -> str:
-        """将检索到的文档格式化为上下文字符串"""
-        parts = []
-        for i, doc in enumerate(docs, 1):
-            title = doc.metadata.get("title", "未知论文")
-            parts.append(
-                f"--- 片段 {i} (来源: {title}) ---\n{doc.page_content}"
-            )
-        return "\n\n".join(parts)
-
-    async def ask_with_session_stream(self, question: str, session_id: str, k: int = 5, paper_title: Optional[str] = None, paper_titles: Optional[list[str]] = None):
-        """
-        流式版多轮对话 RAG 问答。
-
-        Args:
-            paper_title: 单篇论文过滤（来自 PDF 阅读器，向后兼容）
-            paper_titles: 多篇论文过滤列表（来自 Chat 页面的论文选择器）
-        """
-        from langchain_core.messages import HumanMessage
-
-        # 合并论文过滤参数
-        effective_titles: Optional[list[str]] = None
-        if paper_title:
-            effective_titles = [paper_title]
-        elif paper_titles:
-            effective_titles = paper_titles
-
-        # 1. 获取会话历史和摘要
-        session = self.session_store.get_session(session_id)
-        if not session:
-            yield {"type": "sources", "data": []}
-            yield {"type": "done", "data": "📭 会话不存在，请创建新会话。"}
-            return
 
         messages = self.session_store.get_messages(session_id)
         summary = session.get("summary", "")
@@ -361,12 +215,14 @@ class PaperQAChain:
         # 3. 检索
         if self.hybrid_retriever:
             docs = self.hybrid_retriever.search(
-                rewritten_query, k=k, filter_titles=effective_titles
+                rewritten_query, k=k,
+                filter_titles=effective_titles,
+                user_id=user_id,
             )
         else:
             title_filter = (
-                self.vector_store.build_title_filter(effective_titles)
-                if effective_titles else None
+                self.vector_store.build_title_filter(effective_titles, user_id=user_id)
+                if effective_titles else ({"user_id": user_id} if user_id else None)
             )
             if title_filter:
                 docs = self.vector_store.search_with_filter(
@@ -375,7 +231,51 @@ class PaperQAChain:
             else:
                 docs = self.vector_store.search(rewritten_query, k=k)
 
-        # 构建 sources
+        if not docs:
+            answer = "📭 知识库为空或未找到相关内容。请先上传论文。"
+            self.session_store.add_message(session_id, "user", question)
+            self.session_store.add_message(session_id, "assistant", answer, "[]")
+            if len(messages) == 0:
+                self.session_store.update_title(session_id, question[:40])
+            return {"answer": answer, "sources": [], "rewritten_query": rewritten_query}
+
+        chunks_text = self._format_context(docs)
+        budget = self.memory.calculate_budget(chunks_text)
+        chat_history = self.memory.format_for_prompt(messages, summary, budget["history_budget"])
+
+        graph_context = ""
+        if self.graph_retriever:
+            try:
+                graph_context = self.graph_retriever.retrieve(question, user_id=user_id)
+            except Exception:
+                graph_context = ""
+
+        if paper_title:
+            paper_scope = (
+                f"\n**当前阅读论文：** 用户正在阅读《{paper_title}》，请优先针对该论文回答，代词如'这个方法'、'该算法'均指该论文中的内容。\n"
+            )
+        elif effective_titles and len(effective_titles) > 0:
+            titles_str = "、".join(f"《{t}》" for t in effective_titles)
+            paper_scope = f"\n**检索范围限定：** 用户已将检索范围限定在以下论文：{titles_str}，请优先从这些论文中回答。\n"
+        else:
+            paper_scope = ""
+
+        if chat_history:
+            answer = self.conv_chain.invoke({
+                "chat_history": chat_history,
+                "graph_context": graph_context,
+                "context": chunks_text,
+                "question": question,
+                "paper_scope": paper_scope,
+            })
+        else:
+            answer = self.chain.invoke({
+                "graph_context": graph_context,
+                "context": chunks_text,
+                "question": question,
+                "paper_scope": paper_scope,
+            })
+
         sources = [
             {
                 "title": doc.metadata.get("title", "未知"),
@@ -385,6 +285,97 @@ class PaperQAChain:
             for doc in docs
         ]
 
+        self.session_store.add_message(session_id, "user", question)
+        self.session_store.add_message(
+            session_id, "assistant", answer, json.dumps(sources, ensure_ascii=False)
+        )
+
+        if len(messages) == 0:
+            title = question[:40] + ("..." if len(question) > 40 else "")
+            self.session_store.update_title(session_id, title)
+
+        new_message_count = len(messages) + 2
+        if self.memory.should_update_summary(new_message_count):
+            all_messages = self.session_store.get_messages(session_id)
+            new_summary = self.memory.generate_summary(all_messages)
+            if new_summary:
+                self.session_store.update_summary(session_id, new_summary)
+
+        return {"answer": answer, "sources": sources, "rewritten_query": rewritten_query}
+
+    def _format_context(self, docs: list[Document]) -> str:
+        """将检索到的文档格式化为上下文字符串"""
+        parts = []
+        for i, doc in enumerate(docs, 1):
+            title = doc.metadata.get("title", "未知论文")
+            parts.append(
+                f"--- 片段 {i} (来源: {title}) ---\n{doc.page_content}"
+            )
+        return "\n\n".join(parts)
+
+    async def ask_with_session_stream(self, question: str, session_id: str, k: int = 5,
+                                      paper_title: Optional[str] = None,
+                                      paper_titles: Optional[list[str]] = None,
+                                      user_id: Optional[str] = None):
+        """
+        流式版多轮对话 RAG 问答。
+
+        Args:
+            paper_title: 单篇论文过滤（来自 PDF 阅读器，向后兼容）
+            paper_titles: 多篇论文过滤列表
+            user_id: 当前用户 ID，用于数据隔离
+        """
+        from langchain_core.messages import HumanMessage
+
+        effective_titles: Optional[list[str]] = None
+        if paper_title:
+            effective_titles = [paper_title]
+        elif paper_titles:
+            effective_titles = paper_titles
+
+        session = self.session_store.get_session(session_id, user_id)
+        if not session:
+            yield {"type": "sources", "data": []}
+            yield {"type": "done", "data": "📭 会话不存在，请创建新会话。"}
+            return
+
+        messages = self.session_store.get_messages(session_id)
+        summary = session.get("summary", "")
+
+        recent_for_rewrite = self.memory.format_for_rewrite(messages, max_turns=2)
+        rewrite_result = self.query_rewriter.rewrite(question, recent_for_rewrite)
+        rewritten_query = rewrite_result["query"]
+        if not effective_titles:
+            filter_hint = rewrite_result.get("filter_title")
+            if filter_hint:
+                effective_titles = [filter_hint]
+
+        if self.hybrid_retriever:
+            docs = self.hybrid_retriever.search(
+                rewritten_query, k=k,
+                filter_titles=effective_titles,
+                user_id=user_id,
+            )
+        else:
+            title_filter = (
+                self.vector_store.build_title_filter(effective_titles, user_id=user_id)
+                if effective_titles else ({"user_id": user_id} if user_id else None)
+            )
+            if title_filter:
+                docs = self.vector_store.search_with_filter(
+                    rewritten_query, k=k, filter_dict=title_filter
+                )
+            else:
+                docs = self.vector_store.search(rewritten_query, k=k)
+
+        sources = [
+            {
+                "title": doc.metadata.get("title", "未知"),
+                "chunk_index": doc.metadata.get("chunk_index", -1),
+                "content_preview": doc.page_content[:150] + "...",
+            }
+            for doc in docs
+        ]
         yield {"type": "sources", "data": sources}
 
         if not docs:
@@ -396,24 +387,17 @@ class PaperQAChain:
             yield {"type": "done", "data": answer}
             return
 
-        # 4. Budget 分配
         chunks_text = self._format_context(docs)
         budget = self.memory.calculate_budget(chunks_text)
+        chat_history = self.memory.format_for_prompt(messages, summary, budget["history_budget"])
 
-        # 5. 格式化历史
-        chat_history = self.memory.format_for_prompt(
-            messages, summary, budget["history_budget"]
-        )
-
-        # 6. 图谱增强检索
         graph_context = ""
         if self.graph_retriever:
             try:
-                graph_context = self.graph_retriever.retrieve(question)
+                graph_context = self.graph_retriever.retrieve(question, user_id=user_id)
             except Exception:
                 graph_context = ""
 
-        # paper_scope 提示
         if paper_title:
             paper_scope = (
                 f"\n**当前阅读论文：** 用户正在阅读《{paper_title}》，请优先针对该论文回答，代词如'这个方法'、'该算法'均指该论文中的内容。\n"
@@ -424,7 +408,6 @@ class PaperQAChain:
         else:
             paper_scope = ""
 
-        # 7. 构造 prompt
         if chat_history:
             prompt_text = CONVERSATIONAL_RAG_PROMPT.format(
                 chat_history=chat_history,
@@ -441,7 +424,6 @@ class PaperQAChain:
                 paper_scope=paper_scope,
             )
 
-        # 8. LLM 流式生成
         full_answer = ""
         try:
             async for chunk in self.llm.astream([HumanMessage(content=prompt_text)]):
@@ -455,7 +437,6 @@ class PaperQAChain:
 
         yield {"type": "done", "data": full_answer}
 
-        # 9. 存储本轮 Q&A
         self.session_store.add_message(session_id, "user", question)
         self.session_store.add_message(
             session_id, "assistant", full_answer, json.dumps(sources, ensure_ascii=False)

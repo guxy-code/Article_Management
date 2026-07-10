@@ -5,6 +5,7 @@
 
 import os
 import json
+from typing import Optional
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from graph.neo4j_store import GraphStore
@@ -34,7 +35,7 @@ class GraphRetriever:
             base_url=os.getenv("OPENAI_BASE_URL"),
         )
 
-    def retrieve(self, question: str) -> str:
+    def retrieve(self, question: str, user_id: Optional[str] = None) -> str:
         """
         从问题中提取实体，查询图谱，返回格式化的关系知识字符串。
         如果没有相关图谱知识，返回空字符串。
@@ -54,16 +55,13 @@ class GraphRetriever:
         # Step 2: 查询图谱
         all_triples = []
 
-        # 检查是否有两个实体（可能在问关系/对比）
         if len(entities) >= 2 and is_relational:
-            # 查两者之间的路径
-            path = self.graph_store.query_path(entities[0], entities[1])
+            path = self.graph_store.query_path(entities[0], entities[1], user_id=user_id)
             if path:
                 all_triples.extend(path)
 
-        # 对每个实体查询关联关系
-        for entity in entities[:3]:  # 最多查 3 个实体
-            triples = self.graph_store.query_related(entity)
+        for entity in entities[:3]:
+            triples = self.graph_store.query_related(entity, user_id=user_id)
             all_triples.extend(triples)
 
         if not all_triples:
@@ -81,9 +79,8 @@ class GraphRetriever:
                 seen.add(key)
                 unique_triples.append(t)
 
-        # 格式化为自然语言
         lines = ["【知识图谱关系】"]
-        for t in unique_triples[:10]:  # 最多 10 条
+        for t in unique_triples[:10]:
             if "subject" in t:
                 lines.append(f"• {t['subject']} --[{t['relation']}]--> {t['object']}")
             else:

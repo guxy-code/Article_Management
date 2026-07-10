@@ -1,9 +1,25 @@
 /**
  * PaperMind API Client
- * 与 FastAPI 后端通信
+ * 与 FastAPI 后端通信，所有需要认证的接口通过 authFetch 自动带上 JWT token。
  */
 
+import { getToken, setAuth } from "@/lib/auth";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+// ========== Auth Fetch Helper ==========
+
+/** 带 Authorization header 的 fetch 封装 */
+async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  return fetch(url, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
 
 // ========== Types ==========
 
@@ -69,32 +85,98 @@ export interface SessionDetail {
   messages: SessionMessage[];
 }
 
+// ========== Auth ==========
+
+export interface AuthResponse {
+  token: string;
+  user: { id: string; username: string };
+}
+
+export async function register(username: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/api/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "注册失败" }));
+    throw new Error(err.detail || "注册失败");
+  }
+  const data: AuthResponse = await res.json();
+  setAuth(data.token, data.user);
+  return data;
+}
+
+export async function login(username: string, password: string): Promise<AuthResponse> {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "登录失败" }));
+    throw new Error(err.detail || "登录失败");
+  }
+  const data: AuthResponse = await res.json();
+  setAuth(data.token, data.user);
+  return data;
+}
+
+export async function getMe(): Promise<{ id: string; username: string; email: string | null; created_at: string }> {
+  const res = await authFetch(`${API_BASE}/api/auth/me`);
+  if (!res.ok) throw new Error("获取用户信息失败");
+  return res.json();
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/api/auth/password`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "修改失败" }));
+    throw new Error(err.detail || "修改失败");
+  }
+}
+
+export async function updateProfile(username?: string, email?: string): Promise<AuthResponse> {
+  const res = await authFetch(`${API_BASE}/api/auth/profile`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, email }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "更新失败" }));
+    throw new Error(err.detail || "更新失败");
+  }
+  const data: AuthResponse = await res.json();
+  setAuth(data.token, data.user);
+  return data;
+}
+
 // ========== Sessions ==========
 
 export async function createSession(): Promise<{ id: string; title: string; created_at: string }> {
-  const res = await fetch(`${API_BASE}/api/sessions`, {
-    method: "POST",
-  });
+  const res = await authFetch(`${API_BASE}/api/sessions`, { method: "POST" });
   if (!res.ok) throw new Error("创建会话失败");
   return res.json();
 }
 
 export async function listSessions(): Promise<SessionInfo[]> {
-  const res = await fetch(`${API_BASE}/api/sessions`);
+  const res = await authFetch(`${API_BASE}/api/sessions`);
   if (!res.ok) throw new Error("获取会话列表失败");
   return res.json();
 }
 
 export async function getSession(sessionId: string): Promise<SessionDetail> {
-  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}`);
+  const res = await authFetch(`${API_BASE}/api/sessions/${sessionId}`);
   if (!res.ok) throw new Error("获取会话详情失败");
   return res.json();
 }
 
 export async function deleteSession(sessionId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
-    method: "DELETE",
-  });
+  const res = await authFetch(`${API_BASE}/api/sessions/${sessionId}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "删除会话失败");
@@ -108,7 +190,7 @@ export async function uploadPaper(file: File, title?: string): Promise<any> {
   formData.append("file", file);
   if (title) formData.append("title", title);
 
-  const res = await fetch(`${API_BASE}/api/papers/upload`, {
+  const res = await authFetch(`${API_BASE}/api/papers/upload`, {
     method: "POST",
     body: formData,
   });
@@ -117,18 +199,17 @@ export async function uploadPaper(file: File, title?: string): Promise<any> {
     const err = await res.json();
     throw new Error(err.detail || "上传失败");
   }
-
   return res.json();
 }
 
 export async function listPapers(): Promise<PaperListResponse> {
-  const res = await fetch(`${API_BASE}/api/papers`);
+  const res = await authFetch(`${API_BASE}/api/papers`);
   if (!res.ok) throw new Error("获取论文列表失败");
   return res.json();
 }
 
 export async function deletePaper(title: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/papers/${encodeURIComponent(title)}`, {
+  const res = await authFetch(`${API_BASE}/api/papers/${encodeURIComponent(title)}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -138,7 +219,10 @@ export async function deletePaper(title: string): Promise<void> {
 }
 
 export function getPaperPdfUrl(title: string): string {
-  return `${API_BASE}/api/papers/${encodeURIComponent(title)}/pdf`;
+  // PDF 流式下载需要带 token，通过 query param 传递（浏览器直接 src 不能设 header）
+  const token = getToken();
+  const base = `${API_BASE}/api/papers/${encodeURIComponent(title)}/pdf`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 }
 
 // ========== Annotations ==========
@@ -163,7 +247,7 @@ export interface Annotation {
 }
 
 export async function getAnnotations(paperTitle: string): Promise<{ annotations: Annotation[] }> {
-  const res = await fetch(`${API_BASE}/api/annotations/${encodeURIComponent(paperTitle)}`);
+  const res = await authFetch(`${API_BASE}/api/annotations/${encodeURIComponent(paperTitle)}`);
   if (!res.ok) throw new Error("获取标注失败");
   return res.json();
 }
@@ -177,7 +261,7 @@ export async function createAnnotation(data: {
   type: "highlight" | "underline" | "strikethrough";
   rects: AnnotationRect[];
 }): Promise<Annotation> {
-  const res = await fetch(`${API_BASE}/api/annotations`, {
+  const res = await authFetch(`${API_BASE}/api/annotations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -187,7 +271,7 @@ export async function createAnnotation(data: {
 }
 
 export async function updateAnnotation(id: string, data: { note?: string; color?: string }): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/annotations/${id}`, {
+  const res = await authFetch(`${API_BASE}/api/annotations/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -196,9 +280,7 @@ export async function updateAnnotation(id: string, data: { note?: string; color?
 }
 
 export async function deleteAnnotation(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/annotations/${id}`, {
-    method: "DELETE",
-  });
+  const res = await authFetch(`${API_BASE}/api/annotations/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("删除标注失败");
 }
 
@@ -209,7 +291,7 @@ export async function chat(
   sessionId?: string,
   k: number = 5
 ): Promise<ChatResponse> {
-  const res = await fetch(`${API_BASE}/api/chat`, {
+  const res = await authFetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question, session_id: sessionId, k }),
@@ -219,7 +301,6 @@ export async function chat(
     const err = await res.json();
     throw new Error(err.detail || "问答失败");
   }
-
   return res.json();
 }
 
@@ -240,7 +321,8 @@ export async function chatStream(
   paperTitle?: string,
   paperTitles?: string[],
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/chat/stream`, {
+  // SSE 用 authFetch（fetch + Authorization header）
+  const res = await authFetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -277,18 +359,12 @@ export async function chatStream(
 
         try {
           const event = JSON.parse(trimmed.slice(6));
-
-          if (event.type === "sources") {
-            callbacks.onSources(event.data);
-          } else if (event.type === "token") {
-            callbacks.onToken(event.data);
-          } else if (event.type === "done") {
-            callbacks.onDone(event.data);
-          } else if (event.type === "error") {
-            callbacks.onError(new Error(event.data));
-          }
+          if (event.type === "sources") callbacks.onSources(event.data);
+          else if (event.type === "token") callbacks.onToken(event.data);
+          else if (event.type === "done") callbacks.onDone(event.data);
+          else if (event.type === "error") callbacks.onError(new Error(event.data));
         } catch {
-          // Skip malformed events
+          // skip malformed events
         }
       }
     }
@@ -300,7 +376,7 @@ export async function chatStream(
 // ========== Search ==========
 
 export async function search(query: string, k: number = 5): Promise<SearchResponse> {
-  const res = await fetch(`${API_BASE}/api/search`, {
+  const res = await authFetch(`${API_BASE}/api/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, k }),
@@ -310,11 +386,10 @@ export async function search(query: string, k: number = 5): Promise<SearchRespon
     const err = await res.json();
     throw new Error(err.detail || "搜索失败");
   }
-
   return res.json();
 }
 
-// --- Knowledge Graph ---
+// ========== Knowledge Graph ==========
 
 export interface GraphNode {
   id: string;
@@ -335,31 +410,31 @@ export interface GraphData {
 }
 
 export async function getGraph(): Promise<GraphData> {
-  const res = await fetch(`${API_BASE}/api/graph`);
+  const res = await authFetch(`${API_BASE}/api/graph`);
   if (!res.ok) throw new Error("获取图谱失败");
   return res.json();
 }
 
 export async function getPaperGraph(title: string): Promise<GraphData> {
-  const res = await fetch(`${API_BASE}/api/graph/paper/${encodeURIComponent(title)}`);
+  const res = await authFetch(`${API_BASE}/api/graph/paper/${encodeURIComponent(title)}`);
   if (!res.ok) throw new Error("获取论文图谱失败");
   return res.json();
 }
 
 export async function getGraphStats(): Promise<Record<string, any>> {
-  const res = await fetch(`${API_BASE}/api/graph/stats`);
+  const res = await authFetch(`${API_BASE}/api/graph/stats`);
   if (!res.ok) throw new Error("获取图谱统计失败");
   return res.json();
 }
 
 export async function getKeywordGraph(): Promise<GraphData> {
-  const res = await fetch(`${API_BASE}/api/graph/keywords`);
+  const res = await authFetch(`${API_BASE}/api/graph/keywords`);
   if (!res.ok) throw new Error("获取关键词图谱失败");
   return res.json();
 }
 
 export async function getPapersGraph(titles: string[]): Promise<GraphData> {
-  const res = await fetch(`${API_BASE}/api/graph/papers`, {
+  const res = await authFetch(`${API_BASE}/api/graph/papers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ titles }),
@@ -369,7 +444,7 @@ export async function getPapersGraph(titles: string[]): Promise<GraphData> {
 }
 
 export async function getConcepts(): Promise<{ concepts: string[] }> {
-  const res = await fetch(`${API_BASE}/api/graph/concepts`);
+  const res = await authFetch(`${API_BASE}/api/graph/concepts`);
   if (!res.ok) throw new Error("获取概念失败");
   return res.json();
 }
@@ -381,11 +456,10 @@ export interface PaperWithConcepts {
 }
 
 export async function getPapersWithConcepts(): Promise<{ papers: PaperWithConcepts[] }> {
-  const res = await fetch(`${API_BASE}/api/graph/papers-with-concepts`);
+  const res = await authFetch(`${API_BASE}/api/graph/papers-with-concepts`);
   if (!res.ok) throw new Error("获取论文概念失败");
   return res.json();
 }
-
 
 export interface ConceptFrequency {
   name: string;
@@ -393,20 +467,19 @@ export interface ConceptFrequency {
 }
 
 export async function getConceptFrequency(): Promise<{ concepts: ConceptFrequency[] }> {
-  const res = await fetch(`${API_BASE}/api/graph/concept-frequency`);
+  const res = await authFetch(`${API_BASE}/api/graph/concept-frequency`);
   if (!res.ok) throw new Error("获取概念频率失败");
   return res.json();
 }
 
-
 export async function getMethodEvolution(): Promise<{ relations: { from: string; to: string }[] }> {
-  const res = await fetch(`${API_BASE}/api/graph/method-evolution`);
+  const res = await authFetch(`${API_BASE}/api/graph/method-evolution`);
   if (!res.ok) throw new Error("获取方法演进失败");
   return res.json();
 }
 
 export async function getProblemsSolutions(): Promise<{ data: { paper: string; problem: string }[] }> {
-  const res = await fetch(`${API_BASE}/api/graph/problems-solutions`);
+  const res = await authFetch(`${API_BASE}/api/graph/problems-solutions`);
   if (!res.ok) throw new Error("获取问题解决方案失败");
   return res.json();
 }
@@ -418,7 +491,7 @@ export async function reextractGraph(title: string): Promise<{
   concepts: number;
   relations: number;
 }> {
-  const res = await fetch(`${API_BASE}/api/graph/extract/${encodeURIComponent(title)}`, {
+  const res = await authFetch(`${API_BASE}/api/graph/extract/${encodeURIComponent(title)}`, {
     method: "POST",
   });
   if (!res.ok) {
@@ -428,7 +501,6 @@ export async function reextractGraph(title: string): Promise<{
   return res.json();
 }
 
-
 export interface UploadDay {
   date: string;
   label: string;
@@ -436,13 +508,12 @@ export interface UploadDay {
 }
 
 export async function getUploadHistory(): Promise<{ days: UploadDay[] }> {
-  const res = await fetch(`${API_BASE}/api/papers/upload-history`);
+  const res = await authFetch(`${API_BASE}/api/papers/upload-history`);
   if (!res.ok) throw new Error("获取上传历史失败");
   return res.json();
 }
 
-
-// --- Recommend ---
+// ========== Recommend ==========
 
 export interface RecommendedPaper {
   title: string;
@@ -457,9 +528,7 @@ export async function getRecommendations(
   range: string = "1year",
   level: string = "all"
 ): Promise<{ papers: RecommendedPaper[]; keywords: string[] }> {
-  const res = await fetch(
-    `${API_BASE}/api/recommend?range=${range}&level=${level}`
-  );
+  const res = await authFetch(`${API_BASE}/api/recommend?range=${range}&level=${level}`);
   if (!res.ok) throw new Error("获取推荐失败");
   return res.json();
 }

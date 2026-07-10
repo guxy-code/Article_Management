@@ -84,10 +84,10 @@ def search_papers(
     return papers
 
 
-def get_recommendation_keywords(graph_store) -> list[str]:
-    """从 Neo4j 获取 Top 3 Concept 作为推荐关键词"""
+def get_recommendation_keywords(graph_store, user_id: str = "system") -> list[str]:
+    """从 Neo4j 获取当前用户 Top 3 Concept 作为推荐关键词"""
     try:
-        freq = graph_store.get_concept_frequency()
+        freq = graph_store.get_concept_frequency(user_id=user_id)
         return [c["name"] for c in freq[:3]]
     except Exception:
         return []
