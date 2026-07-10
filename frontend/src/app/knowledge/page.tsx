@@ -102,8 +102,8 @@ function KnowledgeContent() {
   const [viewMode, setViewMode] = useState<"structure" | "keywords">("keywords");
   const [graphNodes, setGraphNodes] = useState<GraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<GraphEdge[]>([]);
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
