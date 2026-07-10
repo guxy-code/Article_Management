@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, LayoutGrid, List, Library as LibraryIcon, Brain, X, ChevronLeft, ChevronRight } from "lucide-react";
-import { listPapers, deletePaper, type PaperInfo } from "@/lib/api";
+import { listPapers, deletePaper, getAllPaperStatuses, updatePaperStatus, type PaperInfo, type PaperStatus } from "@/lib/api";
 import { PaperCard } from "@/components/library/paper-card";
 import { PaperListItem } from "@/components/library/paper-list-item";
 import { UploadDialog } from "@/components/library/upload-dialog";
@@ -28,6 +28,7 @@ function LibraryContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
+  const [statusMap, setStatusMap] = useState<Record<string, PaperStatus>>({});
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -40,6 +41,9 @@ function LibraryContent() {
       const data = await listPapers();
       setPapers(data.papers);
       setTotalChunks(data.total_chunks);
+      // 批量加载阅读状态
+      const statusData = await getAllPaperStatuses().catch(() => ({ statuses: {} }));
+      setStatusMap(statusData.statuses || {});
     } catch (err) {
       console.error("Failed to fetch papers:", err);
     } finally {
@@ -69,6 +73,19 @@ function LibraryContent() {
 
   const handleUploadSuccess = () => {
     fetchPapers();
+  };
+
+  const handleStatusChange = async (title: string, newStatus: PaperStatus) => {
+    // 乐观更新：先更新 UI
+    setStatusMap((prev) => ({ ...prev, [title]: newStatus }));
+    // 再异步调 API
+    try {
+      await updatePaperStatus(title, newStatus);
+    } catch (err) {
+      console.error("Failed to update paper status:", err);
+      // 失败时回滚
+      setStatusMap((prev) => ({ ...prev, [title]: "unread" }));
+    }
   };
 
   const handleSelect = (title: string) => {
@@ -185,6 +202,8 @@ function LibraryContent() {
                 <PaperCard
                   key={paper.title}
                   paper={paper}
+                  status={statusMap[paper.title] || "unread"}
+                  onStatusChange={handleStatusChange}
                   selected={selectedPapers.has(paper.title)}
                   onSelect={handleSelect}
                   onDelete={handleDelete}
@@ -210,6 +229,8 @@ function LibraryContent() {
                 <PaperListItem
                   key={paper.title}
                   paper={paper}
+                  status={statusMap[paper.title] || "unread"}
+                  onStatusChange={handleStatusChange}
                   onDelete={handleDelete}
                   onView={(title) => openPaper(title)}
                   zebra={i % 2 === 1}

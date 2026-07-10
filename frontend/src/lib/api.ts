@@ -514,6 +514,25 @@ export async function getUploadHistory(): Promise<{ days: UploadDay[] }> {
   return res.json();
 }
 
+// ========== Paper Status ==========
+
+export type PaperStatus = "unread" | "reading" | "read";
+
+export async function getAllPaperStatuses(): Promise<{ statuses: Record<string, PaperStatus> }> {
+  const res = await authFetch(`${API_BASE}/api/papers/statuses`);
+  if (!res.ok) throw new Error("获取论文状态失败");
+  return res.json();
+}
+
+export async function updatePaperStatus(title: string, status: PaperStatus): Promise<void> {
+  const res = await authFetch(`${API_BASE}/api/papers/${encodeURIComponent(title)}/status`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+  if (!res.ok) throw new Error("更新论文状态失败");
+}
+
 // ========== Recommend ==========
 
 export interface RecommendedPaper {

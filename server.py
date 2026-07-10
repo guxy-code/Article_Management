@@ -40,6 +40,7 @@ from recommend.ccf_mapper import CCFMapper
 from auth.user_store import UserStore
 from auth.jwt_handler import create_access_token, decode_token
 from store.upload_log_store import UploadLogStore
+from store.paper_status_store import PaperStatusStore
 
 
 # ========== 初始化 ==========
@@ -65,6 +66,7 @@ session_store = SessionStore()
 annotation_store = AnnotationStore()
 user_store = UserStore()
 upload_log_store = UploadLogStore()
+paper_status_store = PaperStatusStore()
 
 # 认证依赖
 _security = HTTPBearer()
@@ -195,6 +197,10 @@ class PaperListResponse(BaseModel):
     papers: list[PaperInfo]
     total: int
     total_chunks: int
+
+
+class PaperStatusRequest(BaseModel):
+    status: str  # unread | reading | read
 
 
 class SessionInfo(BaseModel):
@@ -503,6 +509,22 @@ async def list_papers(user_id: str = Depends(get_current_user)):
     return PaperListResponse(papers=papers, total=len(papers), total_chunks=vector_store.total_chunks)
 
 
+@app.get("/api/papers/statuses")
+async def get_all_paper_statuses(user_id: str = Depends(get_current_user)):
+    """获取当前用户所有论文的阅读状态"""
+    statuses = paper_status_store.get_all(user_id=user_id)
+    return {"statuses": statuses}
+
+
+@app.put("/api/papers/{title}/status")
+async def update_paper_status(title: str, data: PaperStatusRequest, user_id: str = Depends(get_current_user)):
+    """更新论文阅读状态"""
+    if data.status not in ("unread", "reading", "read"):
+        raise HTTPException(status_code=400, detail="状态值无效，应为 unread / reading / read")
+    paper_status_store.upsert(title, data.status, user_id=user_id)
+    return {"status": "success", "message": f"已更新《{title}》阅读状态"}
+
+
 @app.get("/api/papers/{title}/pdf")
 async def get_paper_pdf(title: str, token: Optional[str] = None,
                          user_id: Optional[str] = None):
@@ -564,6 +586,12 @@ async def delete_paper(title: str, user_id: str = Depends(get_current_user)):
         annotation_store.delete_by_paper(title, user_id=user_id)
     except Exception as e:
         print(f"⚠️ 标注清理失败: {e}")
+
+    # 5.5 删除阅读状态
+    try:
+        paper_status_store.delete_by_paper(title, user_id=user_id)
+    except Exception as e:
+        print(f"⚠️ 阅读状态清理失败: {e}")
 
     # 6. 删除 PDF 物理文件
     if source_path and os.path.isfile(source_path):

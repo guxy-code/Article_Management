@@ -1,11 +1,11 @@
 /**
- * 论文阅读状态管理 - localStorage
- * 状态：unread | reading | read
+ * 论文阅读状态 - UI 配置与状态切换工具
+ * 状态持久化已迁移到后端 SQLite，前端通过 API 管理。
  */
 
-export type PaperStatus = "unread" | "reading" | "read";
+import type { PaperStatus } from "@/lib/api";
 
-const STORAGE_KEY = "papermind_paper_status";
+export type { PaperStatus };
 
 const STATUS_CONFIG: Record<PaperStatus, {
   label: string;
@@ -45,38 +45,11 @@ const STATUS_CONFIG: Record<PaperStatus, {
   },
 };
 
-function loadAll(): Record<string, PaperStatus> {
-  if (typeof window === "undefined") return {};
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveAll(data: Record<string, PaperStatus>) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-}
-
-export function getPaperStatus(title: string): PaperStatus {
-  const all = loadAll();
-  return all[title] || "unread";
-}
-
-export function setPaperStatus(title: string, status: PaperStatus) {
-  const all = loadAll();
-  all[title] = status;
-  saveAll(all);
-}
-
-export function cyclePaperStatus(title: string): PaperStatus {
-  const current = getPaperStatus(title);
-  const next: PaperStatus = current === "unread" ? "reading" : current === "reading" ? "read" : "unread";
-  setPaperStatus(title, next);
-  return next;
-}
-
 export function getStatusConfig(status: PaperStatus) {
   return STATUS_CONFIG[status];
+}
+
+/** 纯函数：计算下一个阅读状态 unread → reading → read → unread */
+export function cycleStatus(current: PaperStatus): PaperStatus {
+  return current === "unread" ? "reading" : current === "reading" ? "read" : "unread";
 }

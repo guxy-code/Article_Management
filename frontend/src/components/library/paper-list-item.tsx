@@ -1,29 +1,29 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { FileText, Trash2, Eye, Brain } from "lucide-react";
-import type { PaperInfo } from "@/lib/api";
-import { getPaperStatus, cyclePaperStatus, getStatusConfig } from "@/lib/paper-status";
+import type { PaperInfo, PaperStatus } from "@/lib/api";
+import { cycleStatus, getStatusConfig } from "@/lib/paper-status";
 import { cn } from "@/lib/utils";
 
 interface PaperListItemProps {
   paper: PaperInfo;
+  status: PaperStatus;
+  onStatusChange?: (title: string, status: PaperStatus) => void;
   onDelete: (title: string) => void;
   onView?: (title: string) => void;
   zebra?: boolean;
 }
 
-export function PaperListItem({ paper, onDelete, onView, zebra }: PaperListItemProps) {
+export function PaperListItem({ paper, status, onStatusChange, onDelete, onView, zebra }: PaperListItemProps) {
   const router = useRouter();
-  const [status, setStatus] = useState(getPaperStatus(paper.title));
   const statusConfig = getStatusConfig(status);
 
   const handleStatusClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const next = cyclePaperStatus(paper.title);
-    setStatus(next);
+    const next = cycleStatus(status);
+    onStatusChange?.(paper.title, next);
   };
 
   return (
