@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -23,8 +23,8 @@ import {
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from "d3-force";
-import { Brain, X } from "lucide-react";
-import { getGraph, getPaperGraph, getKeywordGraph, getPapersGraph, type GraphNode, type GraphEdge } from "@/lib/api";
+import { Brain, X, RefreshCw, WifiOff } from "lucide-react";
+import { getGraph, getPaperGraph, getKeywordGraph, getPapersGraph, reextractGraph, type GraphNode, type GraphEdge } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 // Node type config
@@ -93,7 +93,7 @@ function computeLayout(
   }));
 }
 
-export default function KnowledgePage() {
+function KnowledgeContent() {
   const searchParams = useSearchParams();
   const paperTitle = searchParams.get("paper");
   const papersParam = searchParams.get("papers");
@@ -108,11 +108,15 @@ export default function KnowledgePage() {
   const [hoveredEdge, setHoveredEdge] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [neo4jUnavailable, setNeo4jUnavailable] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractMsg, setExtractMsg] = useState("");
 
   useEffect(() => {
     async function load() {
       setIsLoading(true);
       setError("");
+      setNeo4jUnavailable(false);
       try {
         let data;
         if (paperTitle) {
@@ -124,8 +128,15 @@ export default function KnowledgePage() {
         } else {
           data = await getGraph();
         }
-        setGraphNodes(data.nodes);
-        setGraphEdges(data.edges);
+        // Check if backend signalled Neo4j is unavailable
+        if ((data as any).neo4j_unavailable) {
+          setNeo4jUnavailable(true);
+          setGraphNodes([]);
+          setGraphEdges([]);
+        } else {
+          setGraphNodes(data.nodes);
+          setGraphEdges(data.edges);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "加载失败");
       } finally {
@@ -239,6 +250,23 @@ export default function KnowledgePage() {
     );
   }
 
+  if (neo4jUnavailable) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center">
+        <div className="w-16 h-16 rounded-2xl bg-orange-50 flex items-center justify-center mb-5">
+          <WifiOff className="w-8 h-8 text-orange-500" />
+        </div>
+        <h2 className="text-lg font-semibold mb-2">Knowledge Graph Unavailable</h2>
+        <p className="text-sm text-muted-foreground text-center max-w-sm leading-relaxed">
+          Neo4j is not connected. Start Neo4j and restart the backend server to enable knowledge graph features.
+        </p>
+        <p className="text-[11px] text-muted-foreground mt-3 font-mono bg-secondary px-3 py-1.5 rounded-[8px]">
+          NEO4J_URI={process.env.NEXT_PUBLIC_NEO4J_URI || "bolt://localhost:7687"}
+        </p>
+      </div>
+    );
+  }
+
   if (error) {
     return (
       <div className="h-full flex items-center justify-center">
@@ -250,13 +278,58 @@ export default function KnowledgePage() {
   if (graphNodes.length === 0) {
     return (
       <div className="h-full flex flex-col items-center justify-center">
-        <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-6">
+        <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-5">
           <Brain className="w-8 h-8 text-primary" />
         </div>
         <h2 className="text-lg font-semibold mb-2">No knowledge graph yet</h2>
-        <p className="text-sm text-muted-foreground">
-          Upload papers to build the knowledge graph.
-        </p>
+        {paperTitle ? (
+          <>
+            <p className="text-sm text-muted-foreground text-center max-w-sm leading-relaxed mb-5">
+              No graph data found for this paper. This may happen if extraction failed during upload.
+            </p>
+            <button
+              onClick={async () => {
+                setIsExtracting(true);
+                setExtractMsg("");
+                try {
+                  const result = await reextractGraph(paperTitle);
+                  setExtractMsg(`Extracted ${result.methods} methods, ${result.concepts} concepts`);
+                  // Reload graph after extraction
+                  setIsLoading(true);
+                  const data = await getPaperGraph(paperTitle);
+                  setGraphNodes(data.nodes);
+                  setGraphEdges(data.edges);
+                  setIsLoading(false);
+                } catch (err) {
+                  setExtractMsg(err instanceof Error ? err.message : "Extraction failed");
+                } finally {
+                  setIsExtracting(false);
+                }
+              }}
+              disabled={isExtracting}
+              className="h-9 px-4 rounded-[10px] bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center gap-2"
+            >
+              {isExtracting ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  Extracting...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  Re-extract Graph
+                </>
+              )}
+            </button>
+            {extractMsg && (
+              <p className="text-[12px] text-muted-foreground mt-3">{extractMsg}</p>
+            )}
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Upload papers to build the knowledge graph.
+          </p>
+        )}
       </div>
     );
   }
@@ -442,5 +515,13 @@ export default function KnowledgePage() {
         </motion.div>
       )}
     </div>
+  );
+}
+
+export default function KnowledgePage() {
+  return (
+    <Suspense fallback={<div className="h-full" />}>
+      <KnowledgeContent />
+    </Suspense>
   );
 }

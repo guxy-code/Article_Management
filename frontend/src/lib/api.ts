@@ -404,6 +404,23 @@ export async function getProblemsSolutions(): Promise<{ data: { paper: string; p
   return res.json();
 }
 
+export async function reextractGraph(title: string): Promise<{
+  status: string;
+  message: string;
+  methods: number;
+  concepts: number;
+  relations: number;
+}> {
+  const res = await fetch(`${API_BASE}/api/graph/extract/${encodeURIComponent(title)}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "重新提取失败" }));
+    throw new Error(err.detail || "重新提取失败");
+  }
+  return res.json();
+}
+
 
 export interface UploadDay {
   date: string;

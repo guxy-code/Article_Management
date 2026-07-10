@@ -18,13 +18,28 @@ class GraphStore:
         uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         user = os.getenv("NEO4J_USER", "neo4j")
         password = os.getenv("NEO4J_PASSWORD", "12345678")
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        try:
+            self.driver = GraphDatabase.driver(uri, auth=(user, password))
+            # 主动探测连接是否可用
+            self.driver.verify_connectivity()
+            self.available = True
+        except Exception as e:
+            print(f"⚠️ Neo4j 不可用，知识图谱功能已禁用: {e}")
+            self.driver = None
+            self.available = False
+
+    def _unavailable_response(self) -> dict:
+        """当 Neo4j 不可用时返回的统一空响应"""
+        return {"nodes": [], "edges": [], "neo4j_unavailable": True}
 
     def close(self):
-        self.driver.close()
+        if self.driver:
+            self.driver.close()
 
     def init_schema(self):
         """创建约束和索引"""
+        if not self.available:
+            return
         constraints = [
             "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Paper) REQUIRE p.title IS UNIQUE",
             "CREATE CONSTRAINT IF NOT EXISTS FOR (m:Method) REQUIRE m.name IS UNIQUE",
@@ -57,6 +72,8 @@ class GraphStore:
             ]
         }
         """
+        if not self.available:
+            return
         with self.driver.session() as session:
             title = paper_data.get("title", "")
             authors = paper_data.get("authors", "")
@@ -163,6 +180,8 @@ class GraphStore:
 
     def get_full_graph(self) -> dict:
         """获取完整图谱（所有节点和边），用于前端可视化"""
+        if not self.available:
+            return self._unavailable_response()
         nodes = []
         edges = []
 
@@ -202,6 +221,8 @@ class GraphStore:
 
     def get_paper_subgraph(self, title: str) -> dict:
         """获取某篇论文的知识骨架（2跳，排除其他 Paper 节点）"""
+        if not self.available:
+            return self._unavailable_response()
         nodes = []
         edges = []
 
@@ -253,6 +274,8 @@ class GraphStore:
 
     def get_stats(self) -> dict:
         """获取图谱统计信息"""
+        if not self.available:
+            return {"nodes": {}, "total_edges": 0, "neo4j_unavailable": True}
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -269,6 +292,8 @@ class GraphStore:
 
     def get_papers_subgraph(self, titles: list[str]) -> dict:
         """获取多篇论文的合并子图（2跳，排除列表外的其他 Paper 节点）"""
+        if not self.available:
+            return self._unavailable_response()
         nodes = []
         edges = []
 
@@ -320,6 +345,8 @@ class GraphStore:
 
     def get_keyword_graph(self) -> dict:
         """获取关键词关联图：Paper + Concept 的二部图，展示论文之间通过共享概念的关联"""
+        if not self.available:
+            return self._unavailable_response()
         nodes = []
         edges = []
 
@@ -371,12 +398,16 @@ class GraphStore:
 
     def get_all_concepts(self) -> list[str]:
         """获取所有 Concept 节点名称"""
+        if not self.available:
+            return []
         with self.driver.session() as session:
             result = session.run("MATCH (c:Concept) RETURN c.name AS name ORDER BY name")
             return [r["name"] for r in result]
 
     def get_concept_frequency(self) -> list[dict]:
         """返回每个概念被几篇论文引用，按频率降序"""
+        if not self.available:
+            return []
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -389,6 +420,8 @@ class GraphStore:
 
     def get_method_evolution(self) -> list[dict]:
         """获取所有方法改进关系"""
+        if not self.available:
+            return []
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -400,6 +433,8 @@ class GraphStore:
 
     def get_problems_solutions(self) -> list[dict]:
         """获取论文解决的问题列表"""
+        if not self.available:
+            return []
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -411,10 +446,9 @@ class GraphStore:
             return [{"paper": r["paper"], "problem": r["problem"]} for r in result]
 
     def query_related(self, entity: str) -> list[dict]:
-        """
-        查询与某个实体相关的所有关系。
-        支持模糊匹配（包含关系），返回三元组列表。
-        """
+        """查询与某个实体相关的所有关系。"""
+        if not self.available:
+            return []
         with self.driver.session() as session:
             # 先精确匹配，再模糊匹配
             result = session.run(
@@ -457,6 +491,8 @@ class GraphStore:
 
     def query_path(self, entity_a: str, entity_b: str) -> list[dict]:
         """查询两个实体之间的最短路径"""
+        if not self.available:
+            return []
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -477,6 +513,8 @@ class GraphStore:
 
     def get_paper_concepts(self, title: str) -> list[str]:
         """获取某篇论文关联的 Concept 列表"""
+        if not self.available:
+            return []
         with self.driver.session() as session:
             result = session.run(
                 "MATCH (p:Paper {title: $title})-[:USES_CONCEPT]->(c:Concept) RETURN c.name AS name",
@@ -486,6 +524,8 @@ class GraphStore:
 
     def get_papers_with_concepts(self) -> list[dict]:
         """获取所有论文及其关联的概念"""
+        if not self.available:
+            return []
         with self.driver.session() as session:
             result = session.run(
                 """
@@ -502,5 +542,7 @@ class GraphStore:
 
     def clear_all(self):
         """清空图数据库（谨慎使用）"""
+        if not self.available:
+            return
         with self.driver.session() as session:
             session.run("MATCH (n) DETACH DELETE n")

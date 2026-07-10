@@ -89,7 +89,10 @@ metadata_extractor = MetadataExtractor()
 
 # 知识图谱
 graph_store = GraphStore()
-graph_store.init_schema()
+if graph_store.available:
+    graph_store.init_schema()
+else:
+    print("⚠️ Neo4j 不可用，知识图谱功能已降级，其余功能正常运行")
 knowledge_extractor = KnowledgeExtractor()
 
 # 图谱增强检索：注入到 qa_chain
@@ -690,6 +693,44 @@ async def get_papers_with_concepts():
         return {"papers": data}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@app.post("/api/graph/extract/{title}")
+async def reextract_graph(title: str):
+    """
+    对某篇已入库论文重新运行知识图谱提取并写入 Neo4j。
+    适用于首次提取失败、或图谱数据为空的情况。
+    """
+    if not graph_store.available:
+        raise HTTPException(status_code=503, detail="Neo4j 服务不可用，请检查连接配置")
+
+    # 从向量库获取该论文的文本（取前几个 chunk 拼接）
+    paper_chunks = vector_store.get_paper_chunks(title)
+    if not paper_chunks:
+        raise HTTPException(status_code=404, detail=f"未找到论文《{title}》，请先上传")
+
+    # 拼接前几个 chunk（取前 3000 字符）
+    combined_text = "\n\n".join(
+        chunk.page_content for chunk in paper_chunks[:5]
+    )[:3000]
+
+    authors = paper_chunks[0].metadata.get("authors", "unknown")
+
+    try:
+        graph_data = knowledge_extractor.extract(
+            combined_text, title=title, authors=authors
+        )
+        graph_store.add_paper_graph(graph_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"知识图谱提取失败: {str(e)}")
+
+    return {
+        "status": "success",
+        "message": f"《{title}》知识图谱已重新提取",
+        "methods": len(graph_data.get("methods", [])),
+        "concepts": len(graph_data.get("concepts", [])),
+        "relations": len(graph_data.get("relations", [])),
+    }
 
 
 # ========== 论文推荐 ==========

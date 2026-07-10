@@ -75,6 +75,8 @@ export function PdfViewer({ title, onBack }: PdfViewerProps) {
   });
 
   const containerRef = useRef<HTMLDivElement>(null);
+  // Track the latest annotation load request to prevent stale updates
+  const loadRequestRef = useRef(0);
   const pdfUrl = getPaperPdfUrl(title);
 
   // Intercept Ctrl+wheel to zoom PDF instead of browser
@@ -96,25 +98,26 @@ export function PdfViewer({ title, onBack }: PdfViewerProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [containerRef.current]);
 
-  // Load annotations
-  const fetchAnnotations = useCallback(async () => {
-    try {
-      const data = await getAnnotations(title);
-      setAnnotations(data.annotations);
-    } catch (err) {
-      // Ignore AbortError from strict mode double-invoke cleanup
-      if (err instanceof TypeError && err.message === "Failed to fetch") return;
-      console.error("Failed to load annotations:", err);
-    }
+  // Single unified annotation loader — safe against rapid consecutive calls.
+  // Each call stamps a request ID; only the latest response is applied.
+  const loadAnnotations = useCallback(() => {
+    const requestId = ++loadRequestRef.current;
+    getAnnotations(title)
+      .then((data) => {
+        if (requestId === loadRequestRef.current) {
+          setAnnotations(data.annotations);
+        }
+      })
+      .catch((err) => {
+        if (requestId === loadRequestRef.current) {
+          console.error("Failed to load annotations:", err);
+        }
+      });
   }, [title]);
 
   useEffect(() => {
-    let cancelled = false;
-    getAnnotations(title)
-      .then((data) => { if (!cancelled) setAnnotations(data.annotations); })
-      .catch((err) => { if (!cancelled) console.error("Failed to load annotations:", err); });
-    return () => { cancelled = true; };
-  }, [title]);
+    loadAnnotations();
+  }, [loadAnnotations]);
 
   const onDocumentLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -469,7 +472,7 @@ export function PdfViewer({ title, onBack }: PdfViewerProps) {
               onHover={setHoveredAnnotationId}
               onClick={handleAnnotationClick}
               onClose={() => setPanelOpen(false)}
-              onUpdate={fetchAnnotations}
+              onUpdate={loadAnnotations}
               editingId={editingAnnotationId}
               onEditStart={setEditingAnnotationId}
               onEditEnd={() => setEditingAnnotationId(null)}
