@@ -53,6 +53,7 @@ class VectorStore:
         authors: str = "unknown",
         source_path: str = "",
         user_id: str = "system",
+        venue: str = "",
     ) -> int:
         """
         将论文的 chunk 列表存入向量库。
@@ -63,6 +64,7 @@ class VectorStore:
             authors: 作者
             source_path: PDF 文件路径
             user_id: 所属用户 ID
+            venue: 期刊或会议名称
 
         Returns:
             存入的 chunk 数量
@@ -78,6 +80,7 @@ class VectorStore:
                     "chunk_index": i,
                     "total_chunks": len(chunks),
                     "user_id": user_id,
+                    "venue": venue,
                 },
             )
             documents.append(doc)

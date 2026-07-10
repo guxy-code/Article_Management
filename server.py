@@ -201,6 +201,7 @@ class PaperInfo(BaseModel):
     authors: str
     chunks: int
     source: str
+    venue: str = ""
 
 
 class PaperListResponse(BaseModel):
@@ -425,11 +426,13 @@ async def upload_paper(
     if title and title.strip():
         paper_title = title.strip()
         paper_authors = "unknown"
+        paper_venue = ""
     else:
         first_page = result.pages[0] if result.pages else result.text[:2000]
         metadata = metadata_extractor.extract(first_page)
         paper_title = metadata["title"] or os.path.splitext(file.filename)[0]
         paper_authors = metadata["authors"] or "unknown"
+        paper_venue = metadata.get("venue") or ""
 
     if vector_store.has_paper(paper_title, user_id=user_id):
         return {
@@ -448,6 +451,7 @@ async def upload_paper(
         authors=paper_authors,
         source_path=file_path,
         user_id=user_id,
+        venue=paper_venue,
     )
 
     # 同步更新 BM25 索引
@@ -518,12 +522,14 @@ async def list_papers(user_id: str = Depends(get_current_user)):
         paper_chunks = vector_store.get_paper_chunks(t, user_id=user_id)
         authors = "unknown"
         source = ""
+        venue = ""
         if paper_chunks:
             meta = paper_chunks[0].metadata
             authors = meta.get("authors", "unknown")
             source = meta.get("source", "")
+            venue = meta.get("venue", "")
 
-        papers.append(PaperInfo(title=t, authors=authors, chunks=len(paper_chunks), source=source))
+        papers.append(PaperInfo(title=t, authors=authors, chunks=len(paper_chunks), source=source, venue=venue))
 
     return PaperListResponse(papers=papers, total=len(papers), total_chunks=vector_store.total_chunks)
 

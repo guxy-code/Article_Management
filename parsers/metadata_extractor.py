@@ -15,6 +15,7 @@ EXTRACT_PROMPT = """从以下论文的第一页内容中提取元数据。请返
 {
   "title": "论文完整标题（英文保持原文）",
   "authors": "所有作者姓名，用逗号分隔",
+  "venue": "发表的期刊或会议名称（如 IEEE INFOCOM, NeurIPS, ACL 等，找不到填 null）",
   "abstract": "摘要内容（如果能找到的话，找不到就填 null）"
 }
 
@@ -68,6 +69,7 @@ class MetadataExtractor:
             return {
                 "title": result.get("title", "").strip() or None,
                 "authors": result.get("authors", "").strip() or None,
+                "venue": result.get("venue", "").strip() if result.get("venue") else None,
                 "abstract": result.get("abstract", "").strip() if result.get("abstract") else None,
             }
         except (json.JSONDecodeError, Exception) as e:

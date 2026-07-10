@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, LayoutGrid, List, Library as LibraryIcon, Brain, X } from "lucide-react";
+import { Plus, LayoutGrid, List, Library as LibraryIcon, Brain, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { listPapers, deletePaper, type PaperInfo } from "@/lib/api";
 import { PaperCard } from "@/components/library/paper-card";
 import { PaperListItem } from "@/components/library/paper-list-item";
@@ -28,6 +28,8 @@ function LibraryContent() {
   const [isLoading, setIsLoading] = useState(true);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [selectedPapers, setSelectedPapers] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
 
   // Derive viewingPaper from URL so it survives navigation
   const viewingPaper = searchParams.get("paper");
@@ -103,14 +105,25 @@ function LibraryContent() {
     );
   }
 
+  // Pagination
+  const totalPages = Math.ceil(papers.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, papers.length);
+  const paginatedPapers = papers.slice(startIndex, endIndex);
+
+  // Reset page when papers change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [papers.length, pageSize]);
+
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-border bg-white">
+      <div className="px-5 py-3 border-b border-border bg-white shrink-0">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-lg font-semibold tracking-tight">Library</h1>
-            <p className="text-[13px] text-muted-foreground mt-0.5">
+            <p className="text-[12px] text-muted-foreground mt-0.5">
               {papers.length} papers · {totalChunks} chunks indexed
             </p>
           </div>
@@ -157,7 +170,7 @@ function LibraryContent() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-4">
         {isLoading ? (
           <LoadingSkeleton viewMode={viewMode} />
         ) : papers.length === 0 ? (
@@ -181,17 +194,81 @@ function LibraryContent() {
             </AnimatePresence>
           </motion.div>
         ) : (
-          <div className="space-y-1 max-w-3xl">
+          <div className="border border-border rounded-[14px] overflow-hidden card-shadow">
+            {/* Sticky Table Header */}
+            <div className="sticky top-0 z-10 flex items-center gap-4 px-4 py-2 bg-secondary/90 backdrop-blur-sm border-b border-border text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <div className="w-7 shrink-0" />
+              <div className="flex-1 min-w-0">Title & Authors</div>
+              <div className="w-32 shrink-0 truncate">Venue</div>
+              <div className="w-20 text-center shrink-0">Status</div>
+              <div className="w-16 text-right shrink-0">Chunks</div>
+              <div className="w-28 text-center shrink-0">Actions</div>
+            </div>
+            {/* Table Rows */}
             <AnimatePresence>
-              {papers.map((paper) => (
+              {paginatedPapers.map((paper, i) => (
                 <PaperListItem
                   key={paper.title}
                   paper={paper}
                   onDelete={handleDelete}
                   onView={(title) => openPaper(title)}
+                  zebra={i % 2 === 1}
                 />
               ))}
             </AnimatePresence>
+            {/* Pagination Footer */}
+            <div className="flex items-center justify-between px-4 py-2.5 border-t border-border bg-white">
+              <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span>Rows per page:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="h-7 px-1.5 rounded-[6px] border border-border text-[11px] text-foreground bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer"
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] text-muted-foreground tabular-nums">
+                  {startIndex + 1}-{endIndex} of {papers.length}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={currentPage === 1}
+                    className="w-6 h-6 rounded-[6px] flex items-center justify-center text-muted-foreground hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(pg => (
+                    <button
+                      key={pg}
+                      onClick={() => setCurrentPage(pg)}
+                      className={cn(
+                        "w-6 h-6 rounded-[6px] flex items-center justify-center text-[11px] font-medium transition-all",
+                        pg === currentPage
+                          ? "bg-primary text-white"
+                          : "text-muted-foreground hover:bg-secondary"
+                      )}
+                    >
+                      {pg}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={currentPage === totalPages}
+                    className="w-6 h-6 rounded-[6px] flex items-center justify-center text-muted-foreground hover:bg-secondary disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                    aria-label="Next page"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

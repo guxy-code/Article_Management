@@ -28,6 +28,7 @@ export interface PaperInfo {
   authors: string;
   chunks: number;
   source: string;
+  venue: string;
 }
 
 export interface PaperListResponse {
