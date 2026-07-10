@@ -12,6 +12,9 @@ import {
   Plus,
   Check,
   Trash2,
+  Cpu,
+  Tag,
+  GitBranch,
 } from "lucide-react";
 import {
   getGraphStats,
@@ -82,37 +85,45 @@ export default function HomePage() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
 
           {/* Header */}
-          <h1 className="text-lg font-semibold tracking-tight mb-4">Research Dashboard</h1>
+          <h1 className="text-xl font-semibold tracking-tight mb-5">Research Dashboard</h1>
 
           {/* Stat Cards */}
           <div className="grid grid-cols-4 gap-3 mb-4">
-            <motion.div whileHover={{ y: -2 }} className="p-4 rounded-[14px] bg-indigo-50 cursor-default">
-              <FileText className="w-5 h-5 text-indigo-600 mb-2" />
-              <p className="text-2xl font-bold">{paperCount}</p>
-              <p className="text-[12px] text-muted-foreground">Papers</p>
+            <motion.div whileHover={{ y: -2 }} className="p-4 rounded-[14px] border border-border bg-white card-shadow cursor-default">
+              <div className="w-9 h-9 rounded-[10px] bg-indigo-50 flex items-center justify-center mb-3">
+                <FileText className="w-[18px] h-[18px] text-indigo-600" />
+              </div>
+              <p className="text-2xl font-bold tracking-tight">{paperCount}</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5">Papers</p>
             </motion.div>
-            <motion.div whileHover={{ y: -2 }} className="p-4 rounded-[14px] bg-blue-50 cursor-default">
-              <svg className="w-5 h-5 text-blue-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-              <p className="text-2xl font-bold">{methodCount}</p>
-              <p className="text-[12px] text-muted-foreground">Methods</p>
+            <motion.div whileHover={{ y: -2 }} className="p-4 rounded-[14px] border border-border bg-white card-shadow cursor-default">
+              <div className="w-9 h-9 rounded-[10px] bg-blue-50 flex items-center justify-center mb-3">
+                <Cpu className="w-[18px] h-[18px] text-blue-600" />
+              </div>
+              <p className="text-2xl font-bold tracking-tight">{methodCount}</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5">Methods</p>
             </motion.div>
-            <motion.div whileHover={{ y: -2 }} className="p-4 rounded-[14px] bg-purple-50 cursor-default">
-              <svg className="w-5 h-5 text-purple-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z" /></svg>
-              <p className="text-2xl font-bold">{conceptCount}</p>
-              <p className="text-[12px] text-muted-foreground">Topics</p>
+            <motion.div whileHover={{ y: -2 }} className="p-4 rounded-[14px] border border-border bg-white card-shadow cursor-default">
+              <div className="w-9 h-9 rounded-[10px] bg-purple-50 flex items-center justify-center mb-3">
+                <Tag className="w-[18px] h-[18px] text-purple-600" />
+              </div>
+              <p className="text-2xl font-bold tracking-tight">{conceptCount}</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5">Topics</p>
             </motion.div>
-            <motion.div whileHover={{ y: -2 }} className="p-4 rounded-[14px] bg-emerald-50 cursor-default">
-              <svg className="w-5 h-5 text-emerald-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-              <p className="text-2xl font-bold">{totalRelations}</p>
-              <p className="text-[12px] text-muted-foreground">Relations</p>
+            <motion.div whileHover={{ y: -2 }} className="p-4 rounded-[14px] border border-border bg-white card-shadow cursor-default">
+              <div className="w-9 h-9 rounded-[10px] bg-emerald-50 flex items-center justify-center mb-3">
+                <GitBranch className="w-[18px] h-[18px] text-emerald-600" />
+              </div>
+              <p className="text-2xl font-bold tracking-tight">{totalRelations}</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5">Relations</p>
             </motion.div>
           </div>
 
           {/* Row 1: Research Focus + Upload Activity */}
           <div className="grid grid-cols-2 gap-4 mb-4">
             {/* Research Focus */}
-            <div className="p-4 rounded-[14px] border border-border bg-white">
-              <div className="flex items-center justify-between mb-3">
+            <div className="p-5 rounded-[14px] border border-border bg-white card-shadow">
+              <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-medium">Research Focus</h2>
                 <Link href="/stats" className="text-[11px] text-primary hover:underline">Details →</Link>
               </div>
@@ -143,8 +154,8 @@ export default function HomePage() {
             </div>
 
             {/* Upload Activity */}
-            <div className="p-4 rounded-[14px] border border-border bg-white">
-              <h2 className="text-sm font-medium mb-3">Upload Activity</h2>
+            <div className="p-5 rounded-[14px] border border-border bg-white card-shadow">
+              <h2 className="text-sm font-medium mb-4">Upload Activity</h2>
               <div className="flex items-end gap-3 h-28">
                 {uploadDays.map((day) => {
                   const maxCount = Math.max(...uploadDays.map(d => d.count), 1);
@@ -171,8 +182,8 @@ export default function HomePage() {
           {/* Row 2: Recent Papers + To-Do */}
           <div className="grid grid-cols-2 gap-4 mb-4">
             {/* Recent Papers */}
-            <div className="p-4 rounded-[14px] border border-border bg-white">
-              <div className="flex items-center justify-between mb-3">
+            <div className="p-5 rounded-[14px] border border-border bg-white card-shadow">
+              <div className="flex items-center justify-between mb-4">
                 <h2 className="text-sm font-medium">Recent Papers</h2>
                 <Link href="/library" className="text-[11px] text-primary hover:underline">All →</Link>
               </div>
@@ -192,8 +203,8 @@ export default function HomePage() {
             </div>
 
             {/* To-Do */}
-            <div className="p-4 rounded-[14px] border border-border bg-white">
-              <h2 className="text-sm font-medium mb-3">To-Do</h2>
+            <div className="p-5 rounded-[14px] border border-border bg-white card-shadow">
+              <h2 className="text-sm font-medium mb-4">To-Do</h2>
               <div className="space-y-2 mb-3 max-h-[160px] overflow-auto pr-0.5">
                 {todos.map((todo) => (
                   <div key={todo.id} className="group flex items-center gap-2.5 px-2.5 py-2 rounded-[8px] hover:bg-secondary/50 transition-colors">
@@ -219,18 +230,24 @@ export default function HomePage() {
 
           {/* Row 3: Quick Actions */}
           <div className="grid grid-cols-3 gap-3">
-            <Link href="/chat" className="group flex items-center gap-2.5 px-4 py-3.5 rounded-[12px] border border-border bg-white hover:border-primary/20 hover:shadow-sm transition-all">
-              <MessageSquare className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            <Link href="/chat" className="group flex items-center gap-2.5 px-4 py-3.5 rounded-[14px] border border-border bg-white card-shadow hover:card-shadow-hover hover:border-primary/20 transition-all">
+              <div className="w-9 h-9 rounded-[10px] bg-indigo-50 flex items-center justify-center group-hover:bg-indigo-100 transition-colors">
+                <MessageSquare className="w-[18px] h-[18px] text-indigo-600 group-hover:text-indigo-700 transition-colors" />
+              </div>
               <span className="text-[13px] font-medium">Ask AI</span>
               <ArrowRight className="w-4 h-4 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
             </Link>
-            <Link href="/library" className="group flex items-center gap-2.5 px-4 py-3.5 rounded-[12px] border border-border bg-white hover:border-primary/20 hover:shadow-sm transition-all">
-              <Library className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            <Link href="/library" className="group flex items-center gap-2.5 px-4 py-3.5 rounded-[14px] border border-border bg-white card-shadow hover:card-shadow-hover hover:border-primary/20 transition-all">
+              <div className="w-9 h-9 rounded-[10px] bg-blue-50 flex items-center justify-center group-hover:bg-blue-100 transition-colors">
+                <Library className="w-[18px] h-[18px] text-blue-600 group-hover:text-blue-700 transition-colors" />
+              </div>
               <span className="text-[13px] font-medium">Library</span>
               <ArrowRight className="w-4 h-4 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
             </Link>
-            <Link href="/knowledge" className="group flex items-center gap-2.5 px-4 py-3.5 rounded-[12px] border border-border bg-white hover:border-primary/20 hover:shadow-sm transition-all">
-              <Brain className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+            <Link href="/knowledge" className="group flex items-center gap-2.5 px-4 py-3.5 rounded-[14px] border border-border bg-white card-shadow hover:card-shadow-hover hover:border-primary/20 transition-all">
+              <div className="w-9 h-9 rounded-[10px] bg-purple-50 flex items-center justify-center group-hover:bg-purple-100 transition-colors">
+                <Brain className="w-[18px] h-[18px] text-purple-600 group-hover:text-purple-700 transition-colors" />
+              </div>
               <span className="text-[13px] font-medium">Knowledge</span>
               <ArrowRight className="w-4 h-4 text-muted-foreground ml-auto opacity-0 group-hover:opacity-100 transition-opacity" />
             </Link>

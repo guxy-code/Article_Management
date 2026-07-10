@@ -73,7 +73,7 @@ export default function StatsPage() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3 }}
         >
-          <h1 className="text-lg font-semibold tracking-tight mb-5">Research Overview</h1>
+          <h1 className="text-xl font-semibold tracking-tight mb-5">Research Overview</h1>
 
           {/* Stat Cards */}
           <div className="grid grid-cols-4 gap-3 mb-4">
@@ -86,8 +86,8 @@ export default function StatsPage() {
           {/* Two Column */}
           <div className="grid grid-cols-2 gap-4 mb-4">
             {/* Research Focus */}
-            <div className="p-5 rounded-[16px] border border-border bg-white">
-              <h2 className="text-[13px] font-medium mb-4">Research Focus</h2>
+            <div className="p-5 rounded-[14px] border border-border bg-white card-shadow">
+              <h2 className="text-sm font-medium mb-4">Research Focus</h2>
               <div className="space-y-1.5">
                 {concepts.slice(0, 5).map((c) => {
                   const maxCount = concepts[0]?.count || 1;
@@ -128,8 +128,8 @@ export default function StatsPage() {
             </div>
 
             {/* Knowledge Structure */}
-            <div className="p-5 rounded-[16px] border border-border bg-white">
-              <h2 className="text-[13px] font-medium mb-4">Knowledge Structure</h2>
+            <div className="p-5 rounded-[14px] border border-border bg-white card-shadow">
+              <h2 className="text-sm font-medium mb-4">Knowledge Structure</h2>
 
               {/* Thick stacked bar */}
               <div className="h-10 rounded-[10px] overflow-hidden flex mb-5 shadow-inner">
@@ -187,8 +187,8 @@ export default function StatsPage() {
           </div>
 
           {/* Paper Coverage */}
-          <div className="p-5 rounded-[16px] border border-border bg-white">
-            <h2 className="text-[13px] font-medium mb-4">Paper Topic Coverage</h2>
+          <div className="p-5 rounded-[14px] border border-border bg-white card-shadow">
+            <h2 className="text-sm font-medium mb-4">Paper Topic Coverage</h2>
             <div className="space-y-1.5">
               {papers
                 .sort((a, b) => b.concepts.length - a.concepts.length)
@@ -248,15 +248,15 @@ function StatCard({
 }) {
   return (
     <motion.div
-      whileHover={{ y: -2, boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }}
+      whileHover={{ y: -2 }}
       transition={{ duration: 0.15 }}
-      className={`p-4 rounded-[14px] border border-border ${bg} cursor-default`}
+      className="p-4 rounded-[14px] border border-border bg-white card-shadow cursor-default"
     >
-      <div className={`w-8 h-8 rounded-[10px] bg-white/80 flex items-center justify-center mb-3`}>
-        <Icon className={`w-4 h-4 ${iconColor}`} />
+      <div className={`w-9 h-9 rounded-[10px] ${bg} flex items-center justify-center mb-3`}>
+        <Icon className={`w-[18px] h-[18px] ${iconColor}`} />
       </div>
       <p className="text-2xl font-bold tracking-tight">{value}</p>
-      <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+      <p className="text-[12px] text-muted-foreground mt-0.5">{label}</p>
     </motion.div>
   );
 }

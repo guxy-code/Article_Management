@@ -124,7 +124,7 @@ export function TopNav() {
   const showPanel = isOpen && query.trim().length > 0;
 
   return (
-    <header className="h-14 border-b border-border bg-white flex items-center justify-between px-6 relative z-30">
+    <header className="h-14 border-b border-border bg-white/80 backdrop-blur-md flex items-center justify-between px-6 relative z-30">
       {/* Search Bar */}
       <div className="relative w-full max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />

@@ -106,11 +106,11 @@ export default function SettingsPage() {
     <div className="h-full overflow-auto">
       <div className="px-6 py-5 max-w-2xl">
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25 }}>
-          <h1 className="text-lg font-semibold tracking-tight mb-5">Settings</h1>
+          <h1 className="text-xl font-semibold tracking-tight mb-5">Settings</h1>
 
           {/* Account Info */}
-          <div className="p-4 rounded-[14px] border border-border bg-white mb-4">
-            <h2 className="text-sm font-medium mb-3">Account Info</h2>
+          <div className="p-5 rounded-[14px] border border-border bg-white card-shadow mb-4">
+            <h2 className="text-sm font-medium mb-4">Account Info</h2>
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-[12px] text-muted-foreground">Account ID</span>
@@ -124,7 +124,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Edit Profile */}
-          <div className="p-5 rounded-[14px] border border-border bg-white mb-4">
+          <div className="p-5 rounded-[14px] border border-border bg-white card-shadow mb-4">
             <h2 className="text-sm font-medium mb-4">Edit Profile</h2>
             <form onSubmit={handleSaveProfile} className="space-y-4">
               <div>
@@ -166,7 +166,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Change Password */}
-          <div className="p-5 rounded-[14px] border border-border bg-white">
+          <div className="p-5 rounded-[14px] border border-border bg-white card-shadow">
             <h2 className="text-sm font-medium mb-4">Change Password</h2>
             <form onSubmit={handleChangePassword} className="space-y-4">
               <div>

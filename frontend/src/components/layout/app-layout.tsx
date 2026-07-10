@@ -45,7 +45,7 @@ export function AppLayout({ children }: AppLayoutProps) {
       />
       <div className="flex-1 flex flex-col overflow-hidden">
         <TopNav />
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-auto bg-transparent">{children}</main>
       </div>
     </div>
   );
