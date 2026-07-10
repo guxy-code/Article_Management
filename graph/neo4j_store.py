@@ -490,6 +490,30 @@ class GraphStore:
             else:
                 session.run("MATCH (n) DETACH DELETE n")
 
+    def delete_paper_graph(self, title: str, user_id: str = "system"):
+        """删除某篇论文在图谱中的节点和关系，并清理孤立子节点"""
+        if not self.available:
+            return
+        with self.driver.session() as session:
+            # 1. 删除 Paper 节点及其所有直接关系（PROPOSES, ADDRESSES, EVALUATES_ON, USES_CONCEPT）
+            session.run(
+                "MATCH (p:Paper {title: $title, user_id: $user_id}) DETACH DELETE p",
+                title=title, user_id=user_id,
+            )
+            # 2. 删除不再被任何 Paper 引用的孤立子节点（Method/Problem/Concept/Dataset）
+            #    DETACH 确保同时删除子节点间残留的 IMPROVES/SOLVES/USES 关系
+            session.run(
+                """
+                MATCH (n {user_id: $user_id})
+                WHERE NOT n:Paper
+                  AND NOT EXISTS {
+                    MATCH (p:Paper {user_id: $user_id})-[]->(n)
+                  }
+                DETACH DELETE n
+                """,
+                user_id=user_id,
+            )
+
     # --- 辅助方法 ---
 
     def _iter_graph_records(self, result, seen_nodes: set, seen_edges: set):

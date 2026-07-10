@@ -147,6 +147,18 @@ class AnnotationStore:
         conn.close()
         return deleted
 
+    def delete_by_paper(self, paper_title: str, user_id: str = "system") -> int:
+        """删除某篇论文当前用户的所有标注，返回删除条数"""
+        conn = self._get_conn()
+        cursor = conn.execute(
+            "DELETE FROM annotations WHERE paper_title = ? AND user_id = ?",
+            (paper_title, user_id),
+        )
+        conn.commit()
+        deleted = cursor.rowcount
+        conn.close()
+        return deleted
+
     def _row_to_dict(self, row) -> dict:
         try:
             annotation_type = row["type"] or "highlight"

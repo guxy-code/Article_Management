@@ -39,6 +39,7 @@ from recommend.semantic_scholar import search_papers, get_recommendation_keyword
 from recommend.ccf_mapper import CCFMapper
 from auth.user_store import UserStore
 from auth.jwt_handler import create_access_token, decode_token
+from store.upload_log_store import UploadLogStore
 
 
 # ========== 初始化 ==========
@@ -63,6 +64,7 @@ vector_store = VectorStore()
 session_store = SessionStore()
 annotation_store = AnnotationStore()
 user_store = UserStore()
+upload_log_store = UploadLogStore()
 
 # 认证依赖
 _security = HTTPBearer()
@@ -118,25 +120,10 @@ ccf_mapper = CCFMapper()
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploaded_papers")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# 上传日志
-UPLOAD_LOG = os.path.join(os.path.dirname(__file__), "upload_log.json")
-
-
-def _log_upload(title: str, user_id: str = "system"):
-    """记录上传时间（按用户）"""
-    import json
-    from datetime import datetime
-    try:
-        if os.path.exists(UPLOAD_LOG):
-            with open(UPLOAD_LOG, "r", encoding="utf-8") as f:
-                logs = json.load(f)
-        else:
-            logs = []
-        logs.append({"title": title, "date": datetime.now().strftime("%Y-%m-%d"), "user_id": user_id})
-        with open(UPLOAD_LOG, "w", encoding="utf-8") as f:
-            json.dump(logs, f, ensure_ascii=False)
-    except Exception:
-        pass
+# 上传日志（旧版 JSON 路径，仅用于迁移）
+UPLOAD_LOG_JSON = os.path.join(os.path.dirname(__file__), "upload_log.json")
+# 启动时自动迁移旧版 JSON 数据到 SQLite
+upload_log_store.migrate_from_json(UPLOAD_LOG_JSON)
 
 
 # ========== 工具函数 ==========
@@ -475,7 +462,7 @@ async def upload_paper(
     except Exception as e:
         print(f"⚠️ 知识图谱提取失败: {e}")
 
-    _log_upload(paper_title, user_id=user_id)
+    upload_log_store.log(paper_title, user_id=user_id)
 
     return {
         "status": "success",
@@ -490,26 +477,8 @@ async def upload_paper(
 @app.get("/api/papers/upload-history")
 async def get_upload_history(user_id: str = Depends(get_current_user)):
     """获取当前用户最近 7 天每天上传论文数量"""
-    from datetime import datetime, timedelta
-    try:
-        if os.path.exists(UPLOAD_LOG):
-            with open(UPLOAD_LOG, "r", encoding="utf-8") as f:
-                logs = json.load(f)
-        else:
-            logs = []
-
-        today = datetime.now().date()
-        days = []
-        for i in range(6, -1, -1):
-            d = today - timedelta(days=i)
-            date_str = d.strftime("%Y-%m-%d")
-            count = sum(1 for log in logs
-                        if log.get("date") == date_str and log.get("user_id", "system") == user_id)
-            days.append({"date": date_str, "label": d.strftime("%m/%d"), "count": count})
-
-        return {"days": days}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    days = upload_log_store.get_recent_7days(user_id)
+    return {"days": days}
 
 
 @app.get("/api/papers", response_model=PaperListResponse)
@@ -569,13 +538,44 @@ async def get_paper_pdf(title: str, token: Optional[str] = None,
 
 @app.delete("/api/papers/{title}")
 async def delete_paper(title: str, user_id: str = Depends(get_current_user)):
-    """删除一篇论文"""
-    success = vector_store.delete_paper(title, user_id=user_id)
-    if success:
-        bm25_store.remove_by_title(title)
-        return {"status": "success", "message": f"已删除《{title}》"}
-    else:
+    """删除一篇论文（全链路清理：向量库 + BM25 + 知识图谱 + 标注 + PDF文件）"""
+    # 1. 删除前先获取论文元数据（source 路径），删除后无法再查
+    paper_chunks = vector_store.get_paper_chunks(title, user_id=user_id)
+    if not paper_chunks:
         raise HTTPException(status_code=404, detail=f"未找到论文《{title}》")
+    source_path = paper_chunks[0].metadata.get("source", "")
+
+    # 2. 从向量库删除
+    success = vector_store.delete_paper(title, user_id=user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"未找到论文《{title}》")
+
+    # 3. 从 BM25 索引删除
+    bm25_store.remove_by_title(title)
+
+    # 4. 从知识图谱删除（Paper 节点 + 关系 + 孤立子节点）
+    try:
+        graph_store.delete_paper_graph(title, user_id=user_id)
+    except Exception as e:
+        print(f"⚠️ 图谱清理失败: {e}")
+
+    # 5. 删除标注
+    try:
+        annotation_store.delete_by_paper(title, user_id=user_id)
+    except Exception as e:
+        print(f"⚠️ 标注清理失败: {e}")
+
+    # 6. 删除 PDF 物理文件
+    if source_path and os.path.isfile(source_path):
+        try:
+            real_source = os.path.realpath(source_path)
+            real_user_dir = os.path.realpath(os.path.join(UPLOAD_DIR, user_id))
+            if real_source.startswith(real_user_dir):
+                os.remove(real_source)
+        except Exception as e:
+            print(f"⚠️ PDF 文件删除失败: {e}")
+
+    return {"status": "success", "message": f"已删除《{title}》"}
 
 
 # ========== 标注管理 ==========
@@ -702,7 +702,7 @@ async def search(request: SearchRequest, user_id: str = Depends(get_current_user
     if not request.query.strip():
         raise HTTPException(status_code=400, detail="搜索内容不能为空")
 
-    docs = vector_store.search(request.query.strip(), k=request.k, user_id=user_id)
+    docs = hybrid_retriever.search(request.query.strip(), k=request.k, user_id=user_id)
 
     results = [
         SearchResult(
