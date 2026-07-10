@@ -113,6 +113,11 @@ function LibraryContent() {
     router.push("/library");
   };
 
+  // Reset page when papers change (must be before any early return to respect Hooks rules)
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [papers.length, pageSize]);
+
   // If viewing a PDF, show the inline viewer instead of the library list
   if (viewingPaper) {
     return (
@@ -127,11 +132,6 @@ function LibraryContent() {
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = Math.min(startIndex + pageSize, papers.length);
   const paginatedPapers = papers.slice(startIndex, endIndex);
-
-  // Reset page when papers change
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [papers.length, pageSize]);
 
   return (
     <div className="h-full flex flex-col">
