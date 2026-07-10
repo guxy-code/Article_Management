@@ -238,11 +238,18 @@ export async function chatStream(
   callbacks: StreamCallbacks,
   k: number = 5,
   paperTitle?: string,
+  paperTitles?: string[],
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, session_id: sessionId, k, paper_title: paperTitle }),
+    body: JSON.stringify({
+      question,
+      session_id: sessionId,
+      k,
+      paper_title: paperTitle,
+      paper_titles: paperTitles && paperTitles.length > 0 ? paperTitles : undefined,
+    }),
   });
 
   if (!res.ok) {

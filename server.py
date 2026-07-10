@@ -133,7 +133,8 @@ class ChatRequest(BaseModel):
     question: str
     session_id: Optional[str] = None
     k: int = 5
-    paper_title: Optional[str] = None  # 当从 PDF 阅读器发起提问时，锁定检索范围到该论文
+    paper_title: Optional[str] = None   # PDF 阅读器：锁定单篇（向后兼容）
+    paper_titles: Optional[list[str]] = None  # Chat 页面：多篇论文过滤
 
 
 class ChatResponse(BaseModel):
@@ -550,6 +551,7 @@ async def chat_stream(request: ChatRequest):
             session_id=request.session_id,
             k=request.k,
             paper_title=request.paper_title,
+            paper_titles=request.paper_titles,
         ):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 

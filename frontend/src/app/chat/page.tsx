@@ -2,13 +2,13 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Brain, User, FileText, Sparkles, Plus, Trash2, MessageSquare } from "lucide-react";
+import { Send, Brain, User, FileText, Sparkles, Plus, Trash2, MessageSquare, BookOpen, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { chatStream } from "@/lib/api";
+import { chatStream, listPapers, type PaperInfo } from "@/lib/api";
 import {
   type Message,
   type Conversation,
@@ -29,6 +29,14 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Paper filter state
+  const [selectedPapers, setSelectedPapers] = useState<string[]>([]);
+  const [allPapers, setAllPapers] = useState<PaperInfo[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const pickerBtnRef = useRef<HTMLButtonElement>(null);
+
   // Load conversations on mount
   useEffect(() => {
     async function load() {
@@ -44,6 +52,26 @@ export default function ChatPage() {
     }
     load();
   }, []);
+
+  // Load available papers for the picker
+  useEffect(() => {
+    listPapers().then((data) => setAllPapers(data.papers)).catch(() => {});
+  }, []);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handle = (e: MouseEvent) => {
+      if (
+        pickerRef.current?.contains(e.target as Node) ||
+        pickerBtnRef.current?.contains(e.target as Node)
+      ) return;
+      setPickerOpen(false);
+      setPickerSearch("");
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [pickerOpen]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -122,35 +150,40 @@ export default function ChatPage() {
     setMessages([...newMessages, assistantMessage]);
 
     try {
-      await chatStream(currentId, question, {
-        onSources: (sources) => {
-          setIsLoading(false); // sources 到达即关闭加载动画
-          setMessages((prev) =>
-            prev.map((m) => (m.id === assistantMsgId ? { ...m, sources } : m))
-          );
+      await chatStream(
+        currentId,
+        question,
+        {
+          onSources: (sources) => {
+            setIsLoading(false);
+            setMessages((prev) =>
+              prev.map((m) => (m.id === assistantMsgId ? { ...m, sources } : m))
+            );
+          },
+          onToken: (token) => {
+            setIsLoading(false);
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId ? { ...m, content: m.content + token } : m
+              )
+            );
+          },
+          onDone: (_fullAnswer) => {},
+          onError: (error) => {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, content: `抱歉，出错了：${error.message}` }
+                  : m
+              )
+            );
+          },
         },
-        onToken: (token) => {
-          setIsLoading(false); // 收到第一个 token 就关闭加载动画
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsgId ? { ...m, content: m.content + token } : m
-            )
-          );
-        },
-        onDone: (_fullAnswer) => {
-          // 流结束，内容已逐步填充完毕
-        },
-        onError: (error) => {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === assistantMsgId
-                ? { ...m, content: `抱歉，出错了：${error.message}` }
-                : m
-            )
-          );
-        },
-      });
-      await refreshList(); // 刷新侧边栏标题
+        5,
+        undefined,                                          // paperTitle (single, for PDF viewer)
+        selectedPapers.length > 0 ? selectedPapers : undefined, // paperTitles (multi, from picker)
+      );
+      await refreshList();
     } catch (error) {
       setMessages((prev) =>
         prev.map((m) =>
@@ -263,33 +296,195 @@ export default function ChatPage() {
 
         {/* Input */}
         <div className="border-t border-border bg-white p-4">
-          <form onSubmit={handleSubmit} className="max-w-3xl mx-auto relative">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask about your papers..."
-              rows={1}
-              className="w-full resize-none rounded-[16px] border border-border bg-secondary/50 px-4 py-3 pr-12 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all"
-              style={{ minHeight: "48px", maxHeight: "200px" }}
-            />
-            <button
-              type="submit"
-              disabled={!input.trim() || isLoading}
-              className={cn(
-                "absolute right-3 bottom-3 w-8 h-8 rounded-[10px] flex items-center justify-center transition-all duration-150",
-                input.trim() && !isLoading
-                  ? "bg-primary text-white hover:bg-primary/90"
-                  : "bg-muted text-muted-foreground cursor-not-allowed"
+          <div className="max-w-3xl mx-auto">
+
+            {/* Paper filter tags row */}
+            {selectedPapers.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {selectedPapers.map((title) => (
+                  <span
+                    key={title}
+                    className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-medium max-w-[200px]"
+                  >
+                    <FileText className="w-3 h-3 shrink-0" />
+                    <span className="truncate">{title}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPapers((prev) => prev.filter((t) => t !== title))}
+                      className="w-4 h-4 rounded-full flex items-center justify-center hover:bg-primary/20 transition-colors shrink-0"
+                      aria-label={`Remove ${title}`}
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setSelectedPapers([])}
+                  className="text-[11px] text-muted-foreground hover:text-foreground transition-colors px-1"
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
+
+            {/* Textarea + buttons row */}
+            <form onSubmit={handleSubmit} className="relative">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  selectedPapers.length > 0
+                    ? `Ask about ${selectedPapers.length} selected paper${selectedPapers.length > 1 ? "s" : ""}...`
+                    : "Ask about your papers..."
+                }
+                rows={1}
+                className="w-full resize-none rounded-[16px] border border-border bg-secondary/50 px-4 py-3 pl-11 pr-12 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all"
+                style={{ minHeight: "48px", maxHeight: "200px" }}
+              />
+
+              {/* Scope picker toggle — vertically centred on the left */}
+              <button
+                ref={pickerBtnRef}
+                type="button"
+                onClick={() => {
+                  setPickerOpen((o) => !o);
+                  setPickerSearch("");
+                }}
+                className={cn(
+                  "absolute left-2 top-[11px] w-7 h-7 rounded-[8px] flex items-center justify-center transition-all",
+                  pickerOpen || selectedPapers.length > 0
+                    ? "bg-primary/10 text-primary"
+                    : "hover:bg-secondary text-muted-foreground hover:text-foreground"
+                )}
+                title="Filter by papers"
+                aria-label="Select papers to search"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Picker popover — anchored to the bottom of the textarea container */}
+              {pickerOpen && (
+                <div
+                  ref={pickerRef}
+                  className="absolute bottom-full left-0 mb-2 w-72 bg-white rounded-[14px] border border-border shadow-lg overflow-hidden z-20"
+                >
+                  {/* Popover header */}
+                  <div className="px-3 pt-3 pb-2 border-b border-border">
+                    <p className="text-[11px] font-medium text-foreground mb-2">
+                      Limit search to specific papers
+                    </p>
+                    <input
+                      type="text"
+                      value={pickerSearch}
+                      onChange={(e) => setPickerSearch(e.target.value)}
+                      placeholder="Filter papers..."
+                      autoFocus
+                      className="w-full h-7 px-2.5 rounded-[8px] border border-border text-[12px] placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/30"
+                    />
+                  </div>
+
+                  {/* Paper list */}
+                  <ul className="max-h-52 overflow-auto py-1">
+                    {allPapers
+                      .filter((p) =>
+                        pickerSearch
+                          ? p.title.toLowerCase().includes(pickerSearch.toLowerCase())
+                          : true
+                      )
+                      .map((paper) => {
+                        const isSelected = selectedPapers.includes(paper.title);
+                        return (
+                          <li
+                            key={paper.title}
+                            onClick={() => {
+                              setSelectedPapers((prev) =>
+                                isSelected
+                                  ? prev.filter((t) => t !== paper.title)
+                                  : [...prev, paper.title]
+                              );
+                            }}
+                            className={cn(
+                              "flex items-center gap-2.5 px-3 py-2 cursor-pointer transition-colors",
+                              isSelected
+                                ? "bg-primary/10 hover:bg-primary/15"
+                                : "hover:bg-secondary"
+                            )}
+                          >
+                            {/* Checkbox */}
+                            <div
+                              className={cn(
+                                "w-4 h-4 rounded-[4px] border-2 flex items-center justify-center shrink-0 transition-all",
+                                isSelected ? "bg-primary border-primary" : "border-border"
+                              )}
+                            >
+                              {isSelected && (
+                                <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 10 10">
+                                  <path d="M2 5l2.5 2.5L8 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[12px] text-foreground truncate font-medium leading-tight">
+                                {paper.title}
+                              </p>
+                              {paper.authors && paper.authors !== "unknown" && (
+                                <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                                  {paper.authors}
+                                </p>
+                              )}
+                            </div>
+                          </li>
+                        );
+                      })}
+                    {allPapers.length === 0 && (
+                      <li className="px-3 py-4 text-[12px] text-muted-foreground text-center">
+                        No papers uploaded yet
+                      </li>
+                    )}
+                  </ul>
+
+                  {/* Footer */}
+                  {selectedPapers.length > 0 && (
+                    <div className="px-3 py-2 border-t border-border flex items-center justify-between">
+                      <span className="text-[11px] text-primary font-medium">
+                        {selectedPapers.length} selected
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPapers([])}
+                        className="text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
-              aria-label="Send message"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
-          <p className="text-center text-[11px] text-muted-foreground mt-2">
-            PaperMind uses RAG to answer based on your uploaded papers.
-          </p>
+
+              {/* Send button — vertically centred on the right */}
+              <button
+                type="submit"
+                disabled={!input.trim() || isLoading}
+                className={cn(
+                  "absolute right-3 top-[11px] w-8 h-8 rounded-[10px] flex items-center justify-center transition-all duration-150",
+                  input.trim() && !isLoading
+                    ? "bg-primary text-white hover:bg-primary/90"
+                    : "bg-muted text-muted-foreground cursor-not-allowed"
+                )}
+                aria-label="Send message"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+
+            <p className="text-center text-[11px] text-muted-foreground mt-2">
+              {selectedPapers.length > 0
+                ? `Searching ${selectedPapers.length} paper${selectedPapers.length > 1 ? "s" : ""} · click 📖 to change`
+                : "PaperMind uses RAG to answer based on your uploaded papers."}
+            </p>
+          </div>
         </div>
       </div>
     </div>

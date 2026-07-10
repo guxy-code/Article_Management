@@ -146,6 +146,7 @@ class VectorStore:
             query: 自然语言查询
             k: 返回结果数量
             filter_dict: Chroma filter，如 {"title": "某论文标题"}
+                         或多篇: {"title": {"$in": ["A", "B"]}}
 
         Returns:
             过滤后的最相关 Document 列表
@@ -153,6 +154,21 @@ class VectorStore:
         if filter_dict:
             return self._vectorstore.similarity_search(query, k=k, filter=filter_dict)
         return self._vectorstore.similarity_search(query, k=k)
+
+    @staticmethod
+    def build_title_filter(titles: list[str]) -> dict:
+        """
+        从论文标题列表构建 Chroma filter。
+
+        单篇: {"title": "xxx"}
+        多篇: {"title": {"$in": ["xxx", "yyy"]}}
+        空:   None（不过滤）
+        """
+        if not titles:
+            return None
+        if len(titles) == 1:
+            return {"title": titles[0]}
+        return {"title": {"$in": titles}}
 
     def get_all_documents(self) -> list[Document]:
         """获取向量库中所有文档（用于构建 BM25 索引）"""

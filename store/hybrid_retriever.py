@@ -29,6 +29,7 @@ class HybridRetriever:
         query: str,
         k: int = 5,
         filter_title: Optional[str] = None,
+        filter_titles: Optional[list[str]] = None,
         use_rerank: bool = True,
     ) -> list[Document]:
         """
@@ -43,7 +44,8 @@ class HybridRetriever:
         Args:
             query: 检索查询（应为经过 query rewrite 的独立查询）
             k: 最终返回结果数
-            filter_title: 可选，限定论文标题
+            filter_title: 单篇论文过滤（向后兼容）
+            filter_titles: 多篇论文过滤列表，优先级高于 filter_title
             use_rerank: 是否启用重排序
 
         Returns:
@@ -51,17 +53,35 @@ class HybridRetriever:
         """
         fetch_k = k * 4  # 粗筛数量
 
+        # 合并 filter_title / filter_titles 为统一的 titles 列表
+        effective_titles: Optional[list[str]] = None
+        if filter_titles:
+            effective_titles = filter_titles
+        elif filter_title:
+            effective_titles = [filter_title]
+
+        # 构建 Chroma filter
+        title_filter = self.vector_store.build_title_filter(effective_titles) if effective_titles else None
+
         # 1. 向量检索
-        if filter_title:
+        if title_filter:
             vector_results = self.vector_store.search_with_filter(
-                query, k=fetch_k, filter_dict={"title": filter_title}
+                query, k=fetch_k, filter_dict=title_filter
             )
         else:
             vector_results = self.vector_store.search(query, k=fetch_k)
 
-        # 2. BM25 检索
+        # 2. BM25 检索（全库，后续 RRF 融合时自然排序会体现相关性）
         bm25_results_with_scores = self.bm25_store.search(query, k=fetch_k)
         bm25_results = [doc for doc, _ in bm25_results_with_scores]
+
+        # 如果有论文过滤，对 BM25 结果也做同样过滤
+        if effective_titles:
+            titles_set = set(effective_titles)
+            bm25_results = [
+                doc for doc in bm25_results
+                if doc.metadata.get("title") in titles_set
+            ]
 
         # 3. RRF 融合
         fused = self._rrf_fusion(vector_results, bm25_results)
