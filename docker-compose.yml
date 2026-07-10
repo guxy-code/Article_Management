@@ -12,6 +12,12 @@ services:
       - neo4j_logs:/logs
     environment:
       - NEO4J_AUTH=neo4j/12345678
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "12345678", "RETURN 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
     restart: unless-stopped
 
   # ===== 后端 FastAPI =====
@@ -33,7 +39,8 @@ services:
       # SQLite 文件路径（放在持久化卷内）
       - DB_PATH=/app/data/sessions.db
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
     restart: unless-stopped
 
   # ===== 前端 Next.js =====
