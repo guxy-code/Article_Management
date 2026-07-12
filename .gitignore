@@ -21,6 +21,7 @@ uploaded_papers/
 article/
 sessions.db
 *.db
+upload_log.json
 
 # ===== IDE 配置 =====
 .idea/
