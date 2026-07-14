@@ -10,6 +10,7 @@ import {
   Home,
   Brain,
   Sparkles,
+  Boxes,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -45,6 +46,7 @@ const navSections: NavSection[] = [
       { href: "/library", icon: Library, label: "Library" },
       { href: "/discover", icon: Sparkles, label: "Discover" },
       { href: "/knowledge", icon: Brain, label: "Knowledge" },
+      { href: "/memory", icon: Boxes, label: "Memory Base" },
     ],
   },
   {

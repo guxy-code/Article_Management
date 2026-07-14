@@ -35,14 +35,14 @@ const TYPE_CONFIG: Record<string, {
   size: number;
   concentricWeight: number;
 }> = {
-  Paper:   { color: "#4F46E5", border: "#6366F1", size: 72, concentricWeight: 10 },
-  Method:  { color: "#2563EB", border: "#3B82F6", size: 54, concentricWeight: 7  },
-  Problem: { color: "#DC2626", border: "#EF4444", size: 50, concentricWeight: 6  },
-  Dataset: { color: "#D97706", border: "#F59E0B", size: 46, concentricWeight: 4  },
-  Concept: { color: "#7C3AED", border: "#A78BFA", size: 42, concentricWeight: 3  },
-  Keyword: { color: "#059669", border: "#34D399", size: 44, concentricWeight: 3  },
+  Paper:   { color: "#4F46E5", border: "#6366F1", size: 36, concentricWeight: 10 },
+  Method:  { color: "#2563EB", border: "#3B82F6", size: 28, concentricWeight: 7  },
+  Problem: { color: "#DC2626", border: "#EF4444", size: 24, concentricWeight: 6  },
+  Dataset: { color: "#D97706", border: "#F59E0B", size: 22, concentricWeight: 4  },
+  Concept: { color: "#7C3AED", border: "#A78BFA", size: 20, concentricWeight: 3  },
+  Keyword: { color: "#059669", border: "#34D399", size: 20, concentricWeight: 3  },
 };
-const DEFAULT_CFG = { color: "#6B7280", border: "#9CA3AF", size: 42, concentricWeight: 2 };
+const DEFAULT_CFG = { color: "#6B7280", border: "#9CA3AF", size: 20, concentricWeight: 2 };
 
 function getNodeCfg(type: string) {
   return TYPE_CONFIG[type] ?? DEFAULT_CFG;
@@ -80,9 +80,9 @@ function buildStylesheet() {
         label: "data(label)",
         "text-valign": "bottom",
         "text-halign": "center",
-        "text-margin-y": 6,
+        "text-margin-y": 4,
         color: "#1F2937",
-        "font-size": 11,
+        "font-size": 7,
         "font-weight": "500",
         "text-wrap": "wrap",
         "text-max-width": 90,
@@ -127,11 +127,11 @@ function buildStylesheet() {
     {
       selector: "edge",
       style: {
-        width: 1.2,
+        width: 0.8,
         "line-color": "#C4CBD8",
         "target-arrow-color": "#C4CBD8",
         "target-arrow-shape": "triangle",
-        "arrow-scale": 0.8,
+        "arrow-scale": 0.6,
         "curve-style": "bezier",
         opacity: 0.55,
       } as any,
@@ -325,8 +325,19 @@ function KnowledgeContent() {
         name: "breadthfirst",
         directed: true,
         circle: true,
-        spacingFactor: 1.6,
-        padding: 60,
+        spacingFactor: 1.0,
+        padding: 50,
+        animate: true,
+        animationDuration: 600,
+        animationEasing: "ease-out-cubic",
+      }
+    : paperTitles
+    ? {
+        name: "breadthfirst",
+        directed: true,
+        circle: true,
+        spacingFactor: 1.0,
+        padding: 50,
         animate: true,
         animationDuration: 600,
         animationEasing: "ease-out-cubic",
@@ -334,15 +345,15 @@ function KnowledgeContent() {
     : {
         name: "concentric",
         concentric: (node: any) => node.data("concentricWeight"),
-        levelWidth: () => 2,
-        minNodeSpacing: 40,
-        spacingFactor: 1.8,
-        padding: 60,
+        levelWidth: () => 4,
+        minNodeSpacing: 22,
+        spacingFactor: 1.1,
+        padding: 40,
         animate: true,
         animationDuration: 700,
         animationEasing: "ease-out-cubic",
       },
-  [paperTitle, viewMode, graphNodes.length]); // eslint-disable-line
+  [paperTitle, paperTitles, viewMode, graphNodes.length]); // eslint-disable-line
 
   // ── Loading / error states ──
   if (isLoading) {

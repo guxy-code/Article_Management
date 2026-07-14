@@ -552,3 +552,234 @@ export async function getRecommendations(
   if (!res.ok) throw new Error("获取推荐失败");
   return res.json();
 }
+
+// ========== Self-Growing Memory ==========
+
+export interface MemoryItem {
+  id: string;
+  knowledge: string;
+  topics: string[];
+  source_papers: string[];
+  source_session: string | null;
+  importance: number;
+  status: string;
+  created_at: string;
+  last_accessed: string;
+  access_count: number;
+  times_used: number;
+}
+
+export interface MemoryStatus {
+  count: number;
+  has_profile: boolean;
+  available: boolean;
+}
+
+export interface MemoryProfile {
+  profile: string | null;
+  interaction_count?: number;
+  updated_at?: string;
+  message?: string;
+}
+
+export interface KnowledgeTreeNode {
+  name: string;
+  type: string;
+  mastery: "mastered" | "learning" | "unexplored";
+  query_count: number;
+  last_queried: string | null;
+}
+
+export interface KnowledgeTreeOverview {
+  unlocked: boolean;
+  reason?: string;
+  paper_count?: number;
+  memory_count?: number;
+  nodes?: KnowledgeTreeNode[];
+  summary?: { mastered: number; learning: number; unexplored: number };
+  total?: number;
+}
+
+export async function getMemoryStatus(): Promise<MemoryStatus> {
+  const res = await authFetch(`${API_BASE}/api/memory/status`);
+  if (!res.ok) throw new Error("获取记忆库状态失败");
+  return res.json();
+}
+
+export async function getMemoryItems(
+  limit: number = 50,
+  offset: number = 0
+): Promise<{ items: MemoryItem[]; total: number }> {
+  const res = await authFetch(`${API_BASE}/api/memory/items?limit=${limit}&offset=${offset}`);
+  if (!res.ok) throw new Error("获取记忆列表失败");
+  return res.json();
+}
+
+export async function deleteMemoryItem(id: string): Promise<void> {
+  const res = await authFetch(`${API_BASE}/api/memory/items/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "删除记忆失败" }));
+    throw new Error(err.detail || "删除记忆失败");
+  }
+}
+
+export async function getMemoryProfile(): Promise<MemoryProfile> {
+  const res = await authFetch(`${API_BASE}/api/memory/profile`);
+  if (!res.ok) throw new Error("获取用户画像失败");
+  return res.json();
+}
+
+export async function refreshMemoryProfile(): Promise<MemoryProfile> {
+  const res = await authFetch(`${API_BASE}/api/memory/refresh-profile`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "画像刷新失败" }));
+    throw new Error(err.detail || "画像刷新失败");
+  }
+  return res.json();
+}
+
+export async function getKnowledgeTree(): Promise<KnowledgeTreeOverview> {
+  const res = await authFetch(`${API_BASE}/api/memory/knowledge-tree`);
+  if (!res.ok) throw new Error("获取知识树失败");
+  return res.json();
+}
+
+// ========== User Interest Graph ==========
+
+export interface InterestGraphNode {
+  name: string;
+  type: "Field" | "Topic" | "Entity";
+  description: string;
+  weight: number;
+  hit_count: number;
+  first_seen: string;
+  last_seen: string;
+  status: string;
+}
+
+export interface InterestGraphEdge {
+  source: string;
+  target: string;
+  type: "CONTAINS" | "RELATES_TO" | "COMPARES_WITH";
+  description: string;
+  weight: number;
+  confidence: number;
+}
+
+export interface InterestGraphData {
+  nodes: InterestGraphNode[];
+  edges: InterestGraphEdge[];
+}
+
+export interface InterestGraphHealth {
+  available: boolean;
+  total_active_nodes?: number;
+  total_dormant_nodes?: number;
+  total_relations?: number;
+  field_count?: number;
+  topic_count?: number;
+  entity_count?: number;
+  orphan_rate?: number;
+  avg_connectivity?: number;
+}
+
+export interface GraphSummaryField {
+  name: string;
+  description: string;
+  weight: number;
+  children: {
+    name: string;
+    type: string;
+    description: string;
+    weight: number;
+    children: { name: string; description: string; weight: number }[];
+  }[];
+}
+
+export interface GrowthLogEntry {
+  id: string;
+  event_type: string;
+  detail: Record<string, unknown>;
+  source: string;
+  created_at: string;
+}
+
+export async function getInterestGraph(status: string = "active"): Promise<InterestGraphData> {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph?status=${status}`);
+  if (!res.ok) throw new Error("获取兴趣图谱失败");
+  return res.json();
+}
+
+export async function getInterestGraphNode(name: string) {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/node/${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error("获取节点详情失败");
+  return res.json();
+}
+
+export async function patchInterestGraphNode(name: string, data: { description?: string; type?: string }) {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/node/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("修改节点失败");
+  return res.json();
+}
+
+export async function deleteInterestGraphNode(name: string) {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/node/${encodeURIComponent(name)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("删除节点失败");
+  return res.json();
+}
+
+export async function restoreInterestGraphNode(name: string) {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/node/${encodeURIComponent(name)}/restore`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("恢复节点失败");
+  return res.json();
+}
+
+export async function mergeInterestGraphNodes(keepName: string, removeName: string) {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/merge`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ keep_name: keepName, remove_name: removeName }),
+  });
+  if (!res.ok) throw new Error("合并节点失败");
+  return res.json();
+}
+
+export async function rebuildInterestGraph() {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/rebuild`, { method: "POST" });
+  if (!res.ok) throw new Error("结构审视失败");
+  return res.json();
+}
+
+export async function getInterestGraphSummary(): Promise<{ summary: GraphSummaryField[] }> {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/summary`);
+  if (!res.ok) throw new Error("获取方向摘要失败");
+  return res.json();
+}
+
+export async function getInterestGraphStats(): Promise<InterestGraphHealth> {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/stats`);
+  if (!res.ok) throw new Error("获取图谱统计失败");
+  return res.json();
+}
+
+export async function getInterestGraphHealth(): Promise<InterestGraphHealth> {
+  const res = await authFetch(`${API_BASE}/api/memory/interest-graph/health`);
+  if (!res.ok) throw new Error("获取健康度失败");
+  return res.json();
+}
+
+export async function getGrowthLog(limit: number = 20): Promise<{ logs: GrowthLogEntry[] }> {
+  const res = await authFetch(`${API_BASE}/api/memory/growth-log?limit=${limit}`);
+  if (!res.ok) throw new Error("获取生长日志失败");
+  return res.json();
+}

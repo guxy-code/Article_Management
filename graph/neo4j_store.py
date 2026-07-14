@@ -175,7 +175,7 @@ class GraphStore:
     # --- 查询 ---
 
     def get_full_graph(self, user_id: str = "system") -> dict:
-        """获取当前用户的完整图谱"""
+        """获取当前用户的完整图谱（排除 UserTopic，那属于兴趣图谱）"""
         if not self.available:
             return self._unavailable_response()
         nodes = []
@@ -185,6 +185,7 @@ class GraphStore:
             result = session.run(
                 """
                 MATCH (n {user_id: $user_id})
+                WHERE NOT n:UserTopic
                 RETURN id(n) AS id, labels(n) AS labels, properties(n) AS props
                 """,
                 user_id=user_id,
@@ -202,6 +203,7 @@ class GraphStore:
             result = session.run(
                 """
                 MATCH (a {user_id: $user_id})-[r]->(b {user_id: $user_id})
+                WHERE NOT a:UserTopic AND NOT b:UserTopic
                 RETURN id(a) AS source, id(b) AS target, type(r) AS rel_type
                 """,
                 user_id=user_id,
@@ -249,13 +251,14 @@ class GraphStore:
         return {"nodes": nodes, "edges": edges}
 
     def get_stats(self, user_id: str = "system") -> dict:
-        """获取当前用户的图谱统计信息"""
+        """获取当前用户的图谱统计信息（排除 UserTopic）"""
         if not self.available:
             return {"nodes": {}, "total_edges": 0, "neo4j_unavailable": True}
         with self.driver.session() as session:
             result = session.run(
                 """
                 MATCH (n {user_id: $user_id})
+                WHERE NOT n:UserTopic
                 RETURN labels(n)[0] AS label, count(n) AS count
                 """,
                 user_id=user_id,
@@ -265,6 +268,7 @@ class GraphStore:
             result = session.run(
                 """
                 MATCH (a {user_id: $user_id})-[r]->(b {user_id: $user_id})
+                WHERE NOT a:UserTopic AND NOT b:UserTopic
                 RETURN count(r) AS count
                 """,
                 user_id=user_id,
@@ -479,6 +483,83 @@ class GraphStore:
                 user_id=user_id,
             )
             return [{"title": r["title"], "authors": r["authors"] or "", "concepts": r["concepts"]} for r in result]
+
+    # --- 知识树掌握状态（自生长记忆） ---
+
+    def update_node_mastery(self, topics: list[str], user_id: str = "system") -> int:
+        """
+        根据蒸馏出的 topics 更新对应节点的掌握状态（问答后异步调用）。
+        对每个 topic 做模糊匹配（toLower CONTAINS），命中的节点：
+        - query_count += 1、last_queried = now
+        - 状态迁移：query_count >= 3 → mastered，否则 learning
+        用 Cypher CASE 原子完成，避免先查后写的竞态。
+        返回受影响的节点总数。
+
+        注意：topics（蒸馏产出，可能含中文）与 Neo4j 节点名（图谱提取产出，多英文）
+        是两套独立 LLM 结果，模糊匹配无法保证全覆盖，这是知识树准确度的天然上限。
+        """
+        if not self.available or not topics:
+            return 0
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        affected = 0
+        with self.driver.session() as session:
+            for topic in topics:
+                t = (topic or "").strip()
+                if not t:
+                    continue
+                result = session.run(
+                    """
+                    MATCH (n {user_id: $user_id})
+                    WHERE (n:Method OR n:Problem OR n:Concept OR n:Dataset)
+                      AND (toLower(n.name) CONTAINS toLower($topic)
+                           OR toLower($topic) CONTAINS toLower(n.name))
+                    SET n.query_count = coalesce(n.query_count, 0) + 1,
+                        n.last_queried = $now,
+                        n.mastery = CASE
+                            WHEN coalesce(n.query_count, 0) + 1 >= 3 THEN 'mastered'
+                            ELSE 'learning'
+                        END
+                    RETURN count(n) AS c
+                    """,
+                    topic=t, user_id=user_id, now=now,
+                )
+                record = result.single()
+                if record:
+                    affected += record["c"]
+        return affected
+
+    def get_knowledge_tree(self, user_id: str = "system") -> list[dict]:
+        """
+        返回当前用户所有非 Paper 节点的掌握状态概览。
+        未被问及过的节点没有 mastery 属性，用 coalesce 兜底为 'unexplored'。
+        """
+        if not self.available:
+            return []
+        with self.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (n {user_id: $user_id})
+                WHERE NOT n:Paper
+                RETURN n.name AS name,
+                       labels(n)[0] AS type,
+                       coalesce(n.mastery, 'unexplored') AS mastery,
+                       coalesce(n.query_count, 0) AS query_count,
+                       n.last_queried AS last_queried
+                ORDER BY query_count DESC, name
+                """,
+                user_id=user_id,
+            )
+            return [
+                {
+                    "name": r["name"],
+                    "type": r["type"],
+                    "mastery": r["mastery"],
+                    "query_count": r["query_count"],
+                    "last_queried": r["last_queried"],
+                }
+                for r in result
+            ]
 
     def clear_all(self, user_id: Optional[str] = None):
         """清空图数据库，如果指定 user_id 只清空该用户的数据"""

@@ -62,7 +62,7 @@ export function PaperListItem({ paper, status, onStatusChange, onDelete, onView,
       </div>
 
       {/* Venue */}
-      <div className="w-32 shrink-0 flex items-center">
+      <div className="w-86 shrink-0 flex items-center">
         <span className="text-[11px] text-muted-foreground truncate">{paper.venue || "—"}</span>
       </div>
 

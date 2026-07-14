@@ -103,6 +103,16 @@ qa_chain = PaperQAChain(
 )
 metadata_extractor = MetadataExtractor()
 
+# 自生长记忆库：存储 + 检索器 + 蒸馏器，注入 qa_chain
+try:
+    from memory import MemoryStore, MemoryRetriever, MemoryDistiller
+    memory_store = MemoryStore()
+    qa_chain.memory_retriever = MemoryRetriever(memory_store)
+    qa_chain.memory_distiller = MemoryDistiller(memory_store)
+except Exception as e:
+    print(f"⚠️ 自生长记忆库初始化失败，记忆功能已降级: {e}")
+    memory_store = None
+
 # 知识图谱
 graph_store = GraphStore()
 if graph_store.available:
@@ -114,6 +124,46 @@ knowledge_extractor = KnowledgeExtractor()
 # 图谱增强检索：注入到 qa_chain
 from rag.graph_retriever import GraphRetriever
 qa_chain.graph_retriever = GraphRetriever(graph_store)
+
+# 用户画像构建器 + 知识树（依赖 graph_store，故在其初始化后注入）
+knowledge_tree = None
+if memory_store is not None:
+    try:
+        from memory import ProfileBuilder
+        qa_chain.profile_builder = ProfileBuilder(
+            memory_store,
+            session_store=session_store,
+            graph_store=graph_store,
+            vector_store=vector_store,
+        )
+    except Exception as e:
+        print(f"⚠️ 用户画像构建器初始化失败，画像功能已降级: {e}")
+
+    try:
+        from memory import KnowledgeTree
+        knowledge_tree = KnowledgeTree(
+            graph_store, memory_store=memory_store, vector_store=vector_store
+        )
+        # 注入到已建好的蒸馏器实例（蒸馏出 topics 后更新知识树）
+        if qa_chain.memory_distiller is not None:
+            qa_chain.memory_distiller.knowledge_tree = knowledge_tree
+    except Exception as e:
+        print(f"⚠️ 知识树初始化失败，掌握状态功能已降级: {e}")
+        knowledge_tree = None
+
+# 用户兴趣图谱：初始化 + 蒸馏器 + 检索器 + 结构审视器注入 qa_chain
+interest_graph = None
+try:
+    from memory import InterestGraph, InterestDistiller, InterestRetriever, StructureReviewer
+    interest_graph = InterestGraph(graph_store)
+    interest_graph.init_schema()
+    _interest_distiller = InterestDistiller(interest_graph)
+    _structure_reviewer = StructureReviewer(interest_graph)
+    _interest_distiller.structure_reviewer = _structure_reviewer
+    qa_chain.interest_distiller = _interest_distiller
+    qa_chain.interest_retriever = InterestRetriever(interest_graph)
+except Exception as e:
+    print(f"⚠️ 用户兴趣图谱初始化失败，图谱功能已降级: {e}")
 
 # CCF 映射
 ccf_mapper = CCFMapper()
@@ -465,6 +515,14 @@ async def upload_paper(
             result.text[:3000], title=paper_title, authors=paper_authors
         )
         graph_store.add_paper_graph(graph_data, user_id=user_id)
+
+        # 用户兴趣图谱：论文上传种子（低权重写入）
+        if interest_graph and interest_graph.available:
+            try:
+                import asyncio
+                asyncio.create_task(_seed_interest_graph(graph_data, user_id))
+            except RuntimeError:
+                pass
     except Exception as e:
         print(f"⚠️ 知识图谱提取失败: {e}")
 
@@ -478,6 +536,77 @@ async def upload_paper(
         "chunks": count,
         "pages": result.total_pages,
     }
+
+
+async def _seed_interest_graph(graph_data: dict, user_id: str):
+    """异步：把论文图谱实体+关系写入用户兴趣图谱（带结构）"""
+    try:
+        from memory.interest_graph import normalize, SEED_WEIGHT
+
+        methods = graph_data.get("methods", [])
+        problems = graph_data.get("problems", [])
+        concepts = graph_data.get("concepts", [])
+        relations = graph_data.get("relations", [])
+
+        # 1. 推断 Topic 节点（用论文的核心方法或问题作为子方向）
+        topic_name = ""
+        topic_desc = ""
+        if problems:
+            topic_name = normalize(problems[0]["name"])
+            topic_desc = problems[0].get("description", "")
+        elif methods:
+            topic_name = normalize(methods[0]["name"])
+            topic_desc = methods[0].get("description", "")
+
+        if topic_name:
+            interest_graph.create_node(topic_name, "Topic", user_id,
+                                       description=topic_desc, weight=0.2, hit_count=0)
+
+        # 2. 写入 Entity 节点
+        all_entity_names = []
+        for method in methods:
+            name = normalize(method["name"])
+            interest_graph.create_node(name, "Entity", user_id,
+                                       description=method.get("description", ""), weight=SEED_WEIGHT, hit_count=0)
+            all_entity_names.append(name)
+        for problem in problems:
+            name = normalize(problem["name"])
+            interest_graph.create_node(name, "Entity", user_id,
+                                       description=problem.get("description", ""), weight=SEED_WEIGHT, hit_count=0)
+            all_entity_names.append(name)
+        for concept in concepts:
+            cname = concept if isinstance(concept, str) else concept.get("name", "")
+            if cname:
+                name = normalize(cname)
+                interest_graph.create_node(name, "Entity", user_id,
+                                           description="", weight=SEED_WEIGHT, hit_count=0)
+                all_entity_names.append(name)
+
+        # 3. 建立 Topic → Entity 的 CONTAINS 层级关系
+        if topic_name:
+            for ename in all_entity_names:
+                if ename != topic_name:
+                    interest_graph.create_relation(topic_name, ename, "CONTAINS", user_id,
+                                                   description="", source="paper_upload")
+
+        # 4. 写入论文图谱中的关系（IMPROVES/SOLVES/USES → RELATES_TO）
+        rel_type_desc = {"IMPROVES": "改进了", "SOLVES": "解决了", "USES": "使用了"}
+        for rel in relations:
+            from_name = normalize(rel.get("from", ""))
+            to_name = normalize(rel.get("to", ""))
+            rtype = rel.get("type", "RELATES_TO")
+            if from_name and to_name:
+                desc = f"{from_name} {rel_type_desc.get(rtype, '关联')} {to_name}"
+                interest_graph.create_relation(from_name, to_name, "RELATES_TO", user_id,
+                                               description=desc, source="paper_upload")
+
+        interest_graph.log_event(user_id, "paper_seed", {
+            "topic": topic_name,
+            "entities": len(all_entity_names),
+            "relations": len(relations),
+        }, source="paper_upload")
+    except Exception as e:
+        print(f"⚠️ 兴趣图谱种子写入失败: {e}")
 
 
 @app.get("/api/papers/upload-history")
@@ -643,6 +772,15 @@ async def create_annotation(data: AnnotationCreate, user_id: str = Depends(get_c
         rects=data.rects,
         user_id=user_id,
     )
+
+    # 用户兴趣图谱：标注信号（增强对应节点 weight）
+    if interest_graph and interest_graph.available and data.text:
+        try:
+            import asyncio
+            asyncio.create_task(_process_annotation_signal(data.text, data.paper_title, user_id))
+        except RuntimeError:
+            pass
+
     return annotation
 
 
@@ -666,6 +804,30 @@ async def delete_annotation(annotation_id: str, user_id: str = Depends(get_curre
     return {"status": "success"}
 
 
+async def _process_annotation_signal(text: str, paper_title: str, user_id: str):
+    """异步：标注文本中的关键术语匹配兴趣图谱节点，增强 weight"""
+    try:
+        from memory.interest_graph import normalize
+        from datetime import datetime
+        nodes = interest_graph.get_top_nodes(user_id, limit=100)
+        now = datetime.now().isoformat()
+        matched = 0
+        for node in nodes:
+            name = node.get("name", "")
+            if name and name.lower() in text.lower():
+                interest_graph.update_node(name, user_id,
+                    weight=min((node.get("weight") or 0) + 0.05, 1.0),
+                    last_seen=now,
+                )
+                matched += 1
+        if matched > 0:
+            interest_graph.log_event(user_id, "annotation_signal", {
+                "paper": paper_title, "matched_nodes": matched,
+            }, source="annotation")
+    except Exception as e:
+        print(f"⚠️ 标注信号处理失败: {e}")
+
+
 # ========== 问答与检索 ==========
 
 @app.post("/api/chat", response_model=ChatResponse)
@@ -677,7 +839,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(get_current_user)):
     question = request.question.strip()
 
     if request.session_id:
-        result = qa_chain.ask_with_session(
+        result = await qa_chain.ask_with_session(
             question=question,
             session_id=request.session_id,
             k=request.k,
@@ -869,7 +1031,7 @@ async def recommend_papers(range: str = "1year", level: str = "all",
     """基于用户研究方向推荐最新论文"""
     from datetime import datetime
 
-    keywords = get_recommendation_keywords(graph_store, user_id=user_id)
+    keywords = get_recommendation_keywords(graph_store, memory_store=memory_store, interest_graph=interest_graph, user_id=user_id)
     if not keywords:
         return {"papers": [], "keywords": [], "message": "请先上传论文以生成研究画像"}
 
@@ -886,6 +1048,254 @@ async def recommend_papers(range: str = "1year", level: str = "all",
         results = [p for p in results if p.get("ccf_level") == level.upper()]
 
     return {"papers": results[:10], "keywords": keywords}
+
+
+# ========== 自生长记忆库 ==========
+
+@app.get("/api/memory/status")
+async def get_memory_status(user_id: str = Depends(get_current_user)):
+    """记忆库状态：总条数 + 画像是否已生成"""
+    if memory_store is None:
+        return {"count": 0, "has_profile": False, "available": False}
+    try:
+        count = memory_store.get_memory_count(user_id)
+        profile = memory_store.get_cached_profile(user_id)
+        return {
+            "count": count,
+            "has_profile": profile is not None,
+            "available": True,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"记忆库状态查询失败: {str(e)}")
+
+
+@app.get("/api/memory/items")
+async def get_memory_items(limit: int = 50, offset: int = 0,
+                            user_id: str = Depends(get_current_user)):
+    """记忆条目列表（按 importance 降序，分页）"""
+    if memory_store is None:
+        return {"items": [], "total": 0}
+    try:
+        items = memory_store.list_memories(user_id, limit=limit, offset=offset)
+        total = memory_store.get_memory_count(user_id)
+        return {"items": items, "total": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"记忆列表查询失败: {str(e)}")
+
+
+@app.delete("/api/memory/items/{memory_id}")
+async def delete_memory_item(memory_id: str, user_id: str = Depends(get_current_user)):
+    """删除一条记忆（同时清理 SQLite + ChromaDB）"""
+    if memory_store is None:
+        raise HTTPException(status_code=503, detail="记忆库不可用")
+    success = memory_store.delete_memory(memory_id, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="记忆不存在")
+    return {"status": "success", "message": "记忆已删除"}
+
+
+@app.get("/api/memory/profile")
+async def get_memory_profile(user_id: str = Depends(get_current_user)):
+    """获取用户画像文本（未生成返回 null）"""
+    if memory_store is None:
+        return {"profile": None}
+    try:
+        profile = memory_store.get_cached_profile(user_id)
+        if not profile:
+            return {"profile": None}
+        return {
+            "profile": profile["profile_text"],
+            "interaction_count": profile.get("interaction_count"),
+            "updated_at": profile.get("updated_at"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"画像查询失败: {str(e)}")
+
+
+@app.post("/api/memory/refresh-profile")
+async def refresh_memory_profile(user_id: str = Depends(get_current_user)):
+    """手动触发画像重算（同步等待生成完成，返回最新画像）"""
+    if memory_store is None or qa_chain.profile_builder is None:
+        raise HTTPException(status_code=503, detail="画像功能不可用")
+    try:
+        await qa_chain.profile_builder.build_profile_async(user_id)
+        profile = memory_store.get_cached_profile(user_id)
+        if not profile:
+            return {"profile": None, "message": "问答轮数不足，暂无法生成画像"}
+        return {
+            "profile": profile["profile_text"],
+            "interaction_count": profile.get("interaction_count"),
+            "updated_at": profile.get("updated_at"),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"画像刷新失败: {str(e)}")
+
+
+@app.get("/api/memory/knowledge-tree")
+async def get_memory_knowledge_tree(user_id: str = Depends(get_current_user)):
+    """知识树掌握状态概览（阈值门控：论文≥3 且 记忆≥10 才解锁）"""
+    if knowledge_tree is None:
+        return {"unlocked": False, "reason": "知识树功能不可用"}
+    try:
+        return knowledge_tree.get_tree_overview(user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"知识树查询失败: {str(e)}")
+
+
+# ========== 用户兴趣图谱 ==========
+
+@app.get("/api/memory/interest-graph")
+async def get_interest_graph(status: str = "active", user_id: str = Depends(get_current_user)):
+    """获取用户兴趣图谱（nodes + edges）"""
+    if not interest_graph or not interest_graph.available:
+        return {"nodes": [], "edges": [], "available": False}
+    try:
+        return interest_graph.get_full_interest_graph(user_id, status=status)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"兴趣图谱查询失败: {str(e)}")
+
+
+@app.get("/api/memory/interest-graph/node/{node_name}")
+async def get_interest_graph_node(node_name: str, user_id: str = Depends(get_current_user)):
+    """获取节点详情"""
+    if not interest_graph or not interest_graph.available:
+        raise HTTPException(status_code=503, detail="兴趣图谱不可用")
+    node = interest_graph.find_node(node_name, user_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="节点不存在")
+    # 附加子节点和关系信息
+    children = interest_graph.get_children(node_name, user_id)
+    ancestors = interest_graph.get_ancestors(node_name, user_id, ancestor_type="Field")
+    return {
+        "node": node,
+        "children": children,
+        "ancestors": ancestors,
+    }
+
+
+class NodePatchRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
+
+
+@app.patch("/api/memory/interest-graph/node/{node_name}")
+async def patch_interest_graph_node(node_name: str, data: NodePatchRequest,
+                                     user_id: str = Depends(get_current_user)):
+    """修改节点属性"""
+    if not interest_graph or not interest_graph.available:
+        raise HTTPException(status_code=503, detail="兴趣图谱不可用")
+    updates = {}
+    if data.description is not None:
+        updates["description"] = data.description
+    if data.type is not None and data.type in ("Field", "Topic", "Entity"):
+        updates["type"] = data.type
+    if not updates:
+        raise HTTPException(status_code=400, detail="无有效更新字段")
+    success = interest_graph.update_node(node_name, user_id, **updates)
+    if not success:
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return {"status": "success"}
+
+
+@app.delete("/api/memory/interest-graph/node/{node_name}")
+async def delete_interest_graph_node(node_name: str, user_id: str = Depends(get_current_user)):
+    """软删除节点"""
+    if not interest_graph or not interest_graph.available:
+        raise HTTPException(status_code=503, detail="兴趣图谱不可用")
+    success = interest_graph.soft_delete_node(node_name, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="节点不存在")
+    return {"status": "success", "message": f"已删除节点「{node_name}」，30天内可恢复"}
+
+
+@app.post("/api/memory/interest-graph/node/{node_name}/restore")
+async def restore_interest_graph_node(node_name: str, user_id: str = Depends(get_current_user)):
+    """恢复已删除节点"""
+    if not interest_graph or not interest_graph.available:
+        raise HTTPException(status_code=503, detail="兴趣图谱不可用")
+    success = interest_graph.restore_node(node_name, user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="节点不存在或已超过恢复期")
+    return {"status": "success", "message": f"已恢复节点「{node_name}」"}
+
+
+class MergeRequest(BaseModel):
+    keep_name: str
+    remove_name: str
+
+
+@app.post("/api/memory/interest-graph/merge")
+async def merge_interest_graph_nodes(data: MergeRequest, user_id: str = Depends(get_current_user)):
+    """手动合并两个节点"""
+    if not interest_graph or not interest_graph.available:
+        raise HTTPException(status_code=503, detail="兴趣图谱不可用")
+    success = interest_graph.merge_nodes(data.keep_name, data.remove_name, user_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="合并失败：节点不存在")
+    return {"status": "success", "message": f"已合并「{data.remove_name}」→「{data.keep_name}」"}
+
+
+@app.post("/api/memory/interest-graph/rebuild")
+async def rebuild_interest_graph(user_id: str = Depends(get_current_user)):
+    """强制触发结构审视"""
+    if not interest_graph or not interest_graph.available:
+        raise HTTPException(status_code=503, detail="兴趣图谱不可用")
+    # 尝试调用结构审视器
+    if qa_chain.interest_distiller and qa_chain.interest_distiller.structure_reviewer:
+        try:
+            stats = await qa_chain.interest_distiller.structure_reviewer.review_async(user_id)
+            return {"status": "success", "message": "结构审视已完成", "stats": stats}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"结构审视失败: {str(e)}")
+    interest_graph.log_event(user_id, "review_triggered", {"reason": "manual"}, source="user_action")
+    return {"status": "success", "message": "结构审视已触发"}
+
+
+@app.get("/api/memory/interest-graph/summary")
+async def get_interest_graph_summary(user_id: str = Depends(get_current_user)):
+    """研究方向结构化摘要"""
+    if not interest_graph or not interest_graph.available:
+        return {"summary": []}
+    try:
+        return {"summary": interest_graph.get_graph_summary(user_id)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"摘要生成失败: {str(e)}")
+
+
+@app.get("/api/memory/interest-graph/stats")
+async def get_interest_graph_stats(user_id: str = Depends(get_current_user)):
+    """图谱统计"""
+    if not interest_graph or not interest_graph.available:
+        return {"available": False}
+    try:
+        health = interest_graph.get_graph_health(user_id)
+        return health
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"统计查询失败: {str(e)}")
+
+
+@app.get("/api/memory/interest-graph/health")
+async def get_interest_graph_health(user_id: str = Depends(get_current_user)):
+    """图谱质量健康度指标"""
+    if not interest_graph or not interest_graph.available:
+        return {"available": False}
+    try:
+        return interest_graph.get_graph_health(user_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"健康度查询失败: {str(e)}")
+
+
+@app.get("/api/memory/growth-log")
+async def get_growth_log(limit: int = 20, user_id: str = Depends(get_current_user)):
+    """最近的生长记录"""
+    if not interest_graph:
+        return {"logs": []}
+    try:
+        logs = interest_graph.get_recent_logs(user_id, limit=limit)
+        return {"logs": logs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"日志查询失败: {str(e)}")
 
 
 # ========== 启动入口 ==========

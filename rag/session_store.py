@@ -178,6 +178,40 @@ class SessionStore:
         conn.commit()
         conn.close()
 
+    def count_user_messages(self, user_id: str, role: str = "user") -> int:
+        """统计某用户跨所有会话的消息条数（默认统计 user 提问数）"""
+        conn = self._get_conn()
+        row = conn.execute(
+            """SELECT COUNT(*) AS c
+               FROM messages m JOIN sessions s ON m.session_id = s.id
+               WHERE s.user_id = ? AND m.role = ?""",
+            (user_id, role),
+        ).fetchone()
+        conn.close()
+        return row["c"] if row else 0
+
+    def get_user_questions(self, user_id: str, limit: int = 50) -> list[str]:
+        """获取某用户跨所有会话的最近 user 提问（去重，按时间倒序取 limit 条）"""
+        conn = self._get_conn()
+        rows = conn.execute(
+            """SELECT m.content, m.created_at
+               FROM messages m JOIN sessions s ON m.session_id = s.id
+               WHERE s.user_id = ? AND m.role = 'user'
+               ORDER BY m.created_at DESC
+               LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
+        conn.close()
+        # 去重（保留顺序）
+        seen = set()
+        questions = []
+        for r in rows:
+            q = r["content"].strip()
+            if q and q not in seen:
+                seen.add(q)
+                questions.append(q)
+        return questions
+
     def update_title(self, session_id: str, title: str):
         """更新会话标题"""
         conn = self._get_conn()

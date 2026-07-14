@@ -218,7 +218,7 @@ function LibraryContent() {
             <div className="sticky top-0 z-10 flex items-center gap-4 px-4 py-2 bg-secondary/90 backdrop-blur-sm border-b border-border text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
               <div className="w-7 shrink-0" />
               <div className="flex-1 min-w-0">Title & Authors</div>
-              <div className="w-32 shrink-0 truncate">Venue</div>
+              <div className="w-86 shrink-0 truncate">Venue</div>
               <div className="w-20 text-center shrink-0">Status</div>
               <div className="w-16 text-right shrink-0">Chunks</div>
               <div className="w-28 text-center shrink-0">Actions</div>
