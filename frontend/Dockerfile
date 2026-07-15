@@ -2,6 +2,9 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
+# 换国内 npm 镜像源加速
+RUN npm config set registry https://registry.npmmirror.com
+
 COPY package*.json ./
 RUN npm ci
 
